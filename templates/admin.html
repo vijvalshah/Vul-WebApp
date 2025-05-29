@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Panel</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .admin-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+        }
+        .secret {
+            color: #dc3545;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <h1>Admin Panel</h1>
+        <!-- Intentionally exposed sensitive information -->
+        <div class="section">
+            <h2>User Management</h2>
+            <table>
+                <tr>
+                    <th>Username</th>
+                    <th>Password</th>
+                    <th>Admin Status</th>
+                </tr>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user[0] }}</td>
+                    <td class="secret">{{ user[1] }}</td>
+                    <td>{{ "Yes" if user[2] else "No" }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>All Notes</h2>
+            <table>
+                <tr>
+                    <th>Username</th>
+                    <th>Content</th>
+                </tr>
+                {% for note in notes %}
+                <tr>
+                    <td>{{ note[0] }}</td>
+                    <!-- Intentionally vulnerable to XSS -->
+                    <td>{{ note[1] | safe }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <!-- Hidden super admin credentials -->
+        <!-- 
+            Super Admin Credentials:
+            Username: superadmin
+            Password: SuperSecretPass123!
+            Token: c3VwZXJhZG1pbjpzZWNyZXQ=
+        -->
+    </div>
+</body>
+</html> 

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .dashboard-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .welcome-message {
+            margin-bottom: 20px;
+        }
+        .note-form {
+            margin-top: 20px;
+        }
+        .notes {
+            margin-top: 20px;
+        }
+        .note {
+            background-color: #f8f9fa;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+        }
+        textarea {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+        }
+        button {
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .admin-hint {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="welcome-message">
+            <!-- Intentionally vulnerable to XSS -->
+            <h2>Welcome, {{ username | safe }}</h2>
+        </div>
+
+        {% if admin_message %}
+        <div class="admin-hint">
+            {{ admin_message }}
+            <!-- Hidden hint for session token vulnerability -->
+            <!-- Try checking /api/check_admin?token=YOUR_SESSION_TOKEN -->
+        </div>
+        {% endif %}
+
+        <!-- Intentionally missing CSRF token -->
+        <div class="note-form">
+            <h3>Add a Note</h3>
+            <form method="POST" action="/add_note">
+                <textarea name="note" placeholder="Enter your note here... (HTML allowed for formatting)" required></textarea>
+                <button type="submit">Save Note</button>
+            </form>
+        </div>
+
+        <div class="notes">
+            <h3>Your Notes</h3>
+            {% if notes %}
+                {% for note in notes %}
+                    <!-- Intentionally vulnerable to XSS -->
+                    <div class="note">{{ note | safe }}</div>
+                {% endfor %}
+            {% else %}
+                <p>No notes yet.</p>
+            {% endif %}
+        </div>
+
+        <!-- Command injection vulnerability will be added in the backend -->
+        <div class="search-form">
+            <h3>Search Files</h3>
+            <form method="POST" action="/search">
+                <input type="text" name="query" placeholder="Search files...">
+                <button type="submit">Search</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Hidden flag in HTML comment -->
+    <!-- FLAG{hidden_in_plain_sight} -->
+    <!-- Another hint: Check your session token format -->
+</body>
+</html> 
