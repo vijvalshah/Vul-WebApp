@@ -43,3 +43,5 @@ The application will be available at `http://localhost:5000`
 9. **Hidden info**
 
 10. **Fake Pages**
+
+11. **Server-Side Template Injection vulnerability**

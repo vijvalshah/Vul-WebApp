@@ -12,6 +12,10 @@
             --card-bg: #ffffff;
         }
 
+        html {
+            height: 100%;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -24,17 +28,50 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: var(--bg-color);
-            padding: 1rem;
+            margin: 0;
+        }
+
+        .bg {
+            animation: slide 3s ease-in-out infinite alternate;
+            background-image: linear-gradient(-60deg, #4f46e5 50%, #10b981 50%);
+            bottom: 0;
+            left: -50%;
+            opacity: .5;
+            position: fixed;
+            right: -50%;
+            top: 0;
+            z-index: -1;
+        }
+
+        .bg2 {
+            animation-direction: alternate-reverse;
+            animation-duration: 4s;
+        }
+
+        .bg3 {
+            animation-duration: 5s;
+        }
+
+        @keyframes slide {
+            0% {
+                transform: translateX(-25%);
+            }
+            100% {
+                transform: translateX(25%);
+            }
         }
 
         .login-container {
             width: 100%;
             max-width: 400px;
             padding: 2rem;
-            background: var(--card-bg);
+            background: rgba(255, 255, 255, 0.95);
             border-radius: 1rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            z-index: 1;
         }
 
         .header {
@@ -47,6 +84,7 @@
             font-size: 1.875rem;
             font-weight: 700;
             margin-bottom: 0.5rem;
+            font-family: monospace;
         }
 
         .header p {
@@ -69,11 +107,12 @@
         .form-group input {
             width: 100%;
             padding: 0.75rem 1rem;
-            border: 1px solid #e5e7eb;
+            border: 1px solid rgba(229, 231, 235, 0.5);
             border-radius: 0.5rem;
             font-size: 1rem;
             color: var(--text-color);
             transition: border-color 0.2s, box-shadow 0.2s;
+            background: rgba(255, 255, 255, 0.9);
         }
 
         .form-group input:focus {
@@ -101,7 +140,7 @@
 
         .error-message {
             padding: 0.75rem 1rem;
-            background-color: #fef2f2;
+            background-color: rgba(254, 242, 242, 0.9);
             border: 1px solid #fee2e2;
             border-radius: 0.5rem;
             color: var(--error-color);
@@ -112,11 +151,16 @@
         @media (max-width: 640px) {
             .login-container {
                 padding: 1.5rem;
+                margin: 1rem;
             }
         }
     </style>
 </head>
 <body>
+    <div class="bg"></div>
+    <div class="bg bg2"></div>
+    <div class="bg bg3"></div>
+
     <div class="login-container">
         <div class="header">
             <h1>Welcome Back</h1>

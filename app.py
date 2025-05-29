@@ -5,6 +5,7 @@ import os
 import base64
 import time
 import re
+from flask import render_template_string
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey123'  # Intentionally weak secret key
@@ -14,12 +15,14 @@ DATABASE = 'users.db'
 
 # Flag definitions
 FLAGS = {
-    'sql_injection': 'CYSM{dhviue23djnfo32xwq}',
-    'privilege_escalation': 'CYSM{asde2f4vdvaaae2e1}',
-    'session_token': 'CYSM{Asdvrnidn02f35das}',
-    'stored_xss': 'CYSM{dfwwwwfw9e0dw2}',
-    'admin_panel': 'CYSM{w3xsspo34se2}',
-    'hidden_info': 'CYSM{cr3kdkas2unkn0wn}'
+    'sql_injection': 'CYSM{sql_in-j3-ct-10-n}',
+    'privilege_escalation': 'CYSM{pr1v1l3g3@escal}',
+    'session_token': 'CYSM{s355i0N&Token}',
+    'stored_xss': 'CYSM{S70*Xs5}',
+    'admin_panel': 'CYSM{4DMINc0n-s0-1}',
+    'hidden_info': 'CYSM{cr4ckedbyWH0?}',
+    'idor': 'CYSM{n0t3-Sn1ff3r}',
+    'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}'
 }
 
 def init_db():
@@ -244,24 +247,16 @@ def flags():
 
 @app.route('/dashboard')
 def dashboard():
-    if not session.get('logged_in'):
+    if 'username' not in session:
         return redirect(url_for('login'))
     
-    # Get user's notes
-    conn = get_db()
-    c = conn.cursor()
-    notes = c.execute("SELECT content FROM notes WHERE username=?", 
-                     (session['username'],)).fetchall()
-    conn.close()
+    db = get_db()
+    c = db.cursor()
+    c.execute("SELECT id, content FROM notes WHERE username=?", (session['username'],))
+    notes = [{'id': row[0], 'content': row[1]} for row in c.fetchall()]
     
-    # Get solved challenges
-    solved_challenges = get_solved_challenges(session['username'])
-    
-    return render_template('dashboard.html', 
-                         username=session['username'],
-                         notes=[note[0] for note in notes],
-                         is_admin=session.get('is_admin', False),
-                         solved_challenges=solved_challenges)
+    is_admin = session.get('is_admin', False)
+    return render_template('dashboard.html', username=session['username'], notes=notes, is_admin=is_admin)
 
 @app.route('/add_note', methods=['POST'])
 def add_note():
@@ -398,13 +393,85 @@ def api_debug():
 # Add route to serve files from userdata directory
 @app.route('/userdata/<path:filename>')
 def serve_userdata(filename):
-    return send_from_directory('userdata', filename)
+    # Intentionally vulnerable to path traversal
+    # Players can use ../ to access files outside userdata directory
+    filepath = os.path.join('userdata', filename)
+    if os.path.exists(filepath):
+        return send_from_directory('userdata', filename)
+    return "File not found", 404
 
 @app.route('/discussions')
 def discussions():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     return render_template('discussions.html')
+
+@app.route('/search', methods=['POST'])
+def search():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    query = request.form.get('query', '')
+    
+    # Check for template injection attempts
+    ssti_patterns = ['{{', '{%', 'config', '__class__', '__globals__']
+    if any(pattern in query for pattern in ssti_patterns):
+        if mark_challenge_solved(session['username'], 'ssti'):
+            flash(f"Congratulations! You found the Template Injection vulnerability! Flag: {FLAGS['ssti']}")
+    
+    # Intentionally vulnerable to template injection
+    # Players can inject Jinja2 template syntax
+    template = f'''
+        <div class="search-results">
+            <h3>Search Results for: {query}</h3>
+            <p>No results found.</p>
+        </div>
+    '''
+    return render_template_string(template)
+
+@app.route('/note/<int:note_id>')
+def view_note(note_id):
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    conn = get_db()
+    c = conn.cursor()
+    note = c.execute("SELECT username, content FROM notes WHERE id=?", (note_id,)).fetchone()
+    conn.close()
+    
+    if note:
+        # Special handling for Unknown user's note
+        if note[0] == 'Unknown':
+            return render_template_string('''
+                <div style="padding: 20px;">
+                    <h3>Note Details</h3>
+                    <p><strong>Author:</strong> {{ note[0] }}</p>
+                    <div style="background: #f3f4f6; padding: 1rem; border-radius: 0.5rem;">
+                        <p style="color: #6b7280; text-align: center;">
+                            🔒 This note has been encrypted by user request.
+                        </p>
+                    </div>
+                    <br>
+                    <a href="/dashboard" class="btn">Back to Dashboard</a>
+                </div>
+            ''', note=note)
+        
+        # Award IDOR flag if accessing another user's note (except Unknown's note)
+        if note[0] != session['username']:
+            if mark_challenge_solved(session['username'], 'idor'):
+                flash(f"Congratulations! You found the IDOR vulnerability! Flag: {FLAGS['idor']}")
+        
+        return render_template_string('''
+            <div style="padding: 20px;">
+                <h3>Note Details</h3>
+                <p><strong>Author:</strong> {{ note[0] }}</p>
+                <div>{{ note[1] | safe }}</div>
+                <br>
+                <a href="/dashboard" class="btn">Back to Dashboard</a>
+            </div>
+        ''', note=note)
+    
+    return "Note not found", 404
 
 if __name__ == '__main__':
     init_db()  # Initialize database when starting the app

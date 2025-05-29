@@ -13,6 +13,10 @@
             --card-bg: #ffffff;
         }
 
+        html {
+            height: 100%;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -21,15 +25,31 @@
         }
 
         body {
-            background-color: var(--bg-color);
             color: var(--text-color);
             min-height: 100vh;
+            margin: 0;
+            position: relative;
+        }
+
+        .bg {
+            background-image: linear-gradient(-60deg, rgba(79, 70, 229, 0.15) 50%, rgba(16, 185, 129, 0.15) 50%);
+            bottom: 0;
+            left: 0;
+            position: fixed;
+            right: 0;
+            top: 0;
+            z-index: -1;
         }
 
         .navbar {
-            background-color: var(--card-bg);
+            background-color: rgba(255, 255, 255, 0.95);
             padding: 1rem;
-            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+            position: relative;
+            z-index: 10;
         }
 
         .navbar-content {
@@ -84,6 +104,8 @@
             max-width: 1200px;
             margin: 2rem auto;
             padding: 0 1rem;
+            position: relative;
+            z-index: 1;
         }
 
         .flash-messages {
@@ -92,19 +114,24 @@
 
         .flash-message {
             padding: 1rem;
-            background-color: #d1fae5;
+            background-color: rgba(209, 250, 229, 0.95);
             border: 1px solid #a7f3d0;
             border-radius: 0.5rem;
             color: #065f46;
             margin-bottom: 0.5rem;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
         }
 
         .card {
-            background-color: var(--card-bg);
+            background-color: rgba(255, 255, 255, 0.95);
             border-radius: 1rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
             padding: 1.5rem;
             margin-bottom: 2rem;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
         }
 
         .card h2 {
@@ -119,12 +146,13 @@
         .note-form textarea {
             width: 100%;
             padding: 0.75rem;
-            border: 1px solid #e5e7eb;
+            border: 1px solid rgba(229, 231, 235, 0.5);
             border-radius: 0.5rem;
             font-size: 1rem;
             margin-bottom: 1rem;
             min-height: 100px;
             resize: vertical;
+            background: rgba(255, 255, 255, 0.9);
         }
 
         .note-form textarea:focus {
@@ -139,19 +167,22 @@
         }
 
         .note {
-            background-color: #f8fafc;
+            background-color: rgba(248, 250, 252, 0.95);
             padding: 1rem;
             border-radius: 0.5rem;
-            border: 1px solid #e5e7eb;
+            border: 1px solid rgba(229, 231, 235, 0.5);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
         }
 
         .search-form input {
             width: 100%;
             padding: 0.75rem;
-            border: 1px solid #e5e7eb;
+            border: 1px solid rgba(229, 231, 235, 0.5);
             border-radius: 0.5rem;
             font-size: 1rem;
             margin-bottom: 1rem;
+            background: rgba(255, 255, 255, 0.9);
         }
 
         .search-form input:focus {
@@ -193,6 +224,8 @@
     </style>
 </head>
 <body>
+    <div class="bg"></div>
+
     <nav class="navbar">
         <div class="navbar-content">
             <div class="user-info">
@@ -231,6 +264,7 @@
 
         <div class="card">
             <h2>📝 Add a Note</h2>
+            <!-- Intentionally vulnerable to CSRF - no CSRF token -->
             <form class="note-form" method="POST" action="/add_note">
                 <textarea name="note" placeholder="Enter your note here... (HTML Formatting supported)" required></textarea>
                 <button type="submit" class="btn">Save Note</button>
@@ -256,7 +290,13 @@
             <div class="notes-list">
                 {% if notes %}
                     {% for note in notes %}
-                        <div class="note">{{ note | safe }}</div>
+                        <div class="note">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <small style="color: #6b7280;">Note #{{ note.id }}</small>
+                                <a href="/note/{{ note.id }}" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">View Details</a>
+                            </div>
+                            {{ note.content | safe }}
+                        </div>
                     {% endfor %}
                 {% else %}
                     <p>No notes yet.</p>
