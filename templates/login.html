@@ -1,69 +1,147 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Vulnerable Login</title>
+    <title>Login - CTF Challenge</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
+        :root {
+            --primary-color: #4f46e5;
+            --error-color: #ef4444;
+            --text-color: #1f2937;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+        }
+
+        * {
             margin: 0;
-            background-color: #f0f0f0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
         }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: var(--bg-color);
+            padding: 1rem;
+        }
+
         .login-container {
-            background-color: white;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+            padding: 2rem;
+            background: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            color: var(--text-color);
+            font-size: 1.875rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 1.5rem;
         }
-        input {
-            width: 100%;
-            padding: 8px;
-            margin-top: 5px;
+
+        .form-group label {
+            display: block;
+            color: var(--text-color);
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
         }
-        button {
+
+        .form-group input {
             width: 100%;
-            padding: 10px;
-            background-color: #007bff;
+            padding: 0.75rem 1rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            color: var(--text-color);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 0.75rem 1.5rem;
+            background-color: var(--primary-color);
             color: white;
             border: none;
-            border-radius: 3px;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 500;
             cursor: pointer;
+            transition: background-color 0.2s;
         }
-        .error {
-            color: red;
-            margin-bottom: 10px;
+
+        .submit-btn:hover {
+            background-color: #4338ca;
+        }
+
+        .error-message {
+            padding: 0.75rem 1rem;
+            background-color: #fef2f2;
+            border: 1px solid #fee2e2;
+            border-radius: 0.5rem;
+            color: var(--error-color);
+            font-size: 0.875rem;
+            margin-bottom: 1.5rem;
+        }
+
+        @media (max-width: 640px) {
+            .login-container {
+                padding: 1.5rem;
+            }
         }
     </style>
 </head>
 <body>
     <div class="login-container">
-        <h2>Login</h2>
-        <!-- Intentionally vulnerable to XSS -->
-        {% if error %}
-            <div class="error">
-                <!-- Intentionally unsafe rendering of error message -->
-                {{ error | safe }}
+        <div class="header">
+            <h1>Welcome Back</h1>
+            <p>Enter your credentials to access the challenges</p>
+        </div>
+
+        <form method="POST" action="/login">
+            {% if error %}
+            <div class="error-message">
+                {{ error }}
             </div>
-        {% endif %}
-        <form method="POST" action="{{ url_for('login') }}">
+            {% endif %}
+
             <div class="form-group">
-                <label for="username">Username:</label>
-                <input type="text" id="username" name="username" required>
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autocomplete="username">
             </div>
+
             <div class="form-group">
-                <label for="password">Password:</label>
-                <input type="password" id="password" name="password" required>
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
             </div>
-            <button type="submit">Login</button>
+
+            <button type="submit" class="submit-btn">Sign In</button>
         </form>
-        <!-- Hidden comment with sensitive info -->
-        <!-- Default credentials: admin/admin123 -->
     </div>
 </body>
 </html> 

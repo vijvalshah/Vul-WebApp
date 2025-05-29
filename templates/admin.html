@@ -1,87 +1,237 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Admin Panel</title>
+    <title>Admin Panel - CTF Challenge</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        :root {
+            --primary-color: #4f46e5;
+            --success-color: #10b981;
+            --error-color: #ef4444;
+            --text-color: #1f2937;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #f0f0f0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            min-height: 100vh;
         }
-        .admin-container {
-            background-color: white;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+
+        .navbar {
+            background-color: var(--card-bg);
+            padding: 1rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
         }
-        .section {
-            margin-bottom: 30px;
+
+        .navbar-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        table {
+
+        .nav-buttons {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            color: white;
+            text-decoration: none;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .flash-messages {
+            margin-bottom: 2rem;
+        }
+
+        .flash-message {
+            padding: 1rem;
+            background-color: #d1fae5;
+            border: 1px solid #a7f3d0;
+            border-radius: 0.5rem;
+            color: #065f46;
+            margin-bottom: 0.5rem;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--text-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 10px;
+            margin-top: 1rem;
         }
-        th, td {
-            padding: 10px;
+
+        .table th,
+        .table td {
+            padding: 0.75rem;
             text-align: left;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid #e5e7eb;
         }
-        th {
-            background-color: #f8f9fa;
+
+        .table th {
+            background-color: #f8fafc;
+            font-weight: 600;
+            color: #4b5563;
         }
-        .secret {
-            color: #dc3545;
-            font-weight: bold;
+
+        .table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        @media (max-width: 640px) {
+            .table-container {
+                overflow-x: auto;
+            }
+
+            .navbar-content {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+
+            .nav-buttons {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="admin-container">
-        <h1>Admin Panel</h1>
-        <!-- Intentionally exposed sensitive information -->
-        <div class="section">
-            <h2>User Management</h2>
-            <table>
-                <tr>
-                    <th>Username</th>
-                    <th>Password</th>
-                    <th>Admin Status</th>
-                </tr>
-                {% for user in users %}
-                <tr>
-                    <td>{{ user[0] }}</td>
-                    <td class="secret">{{ user[1] }}</td>
-                    <td>{{ "Yes" if user[2] else "No" }}</td>
-                </tr>
-                {% endfor %}
-            </table>
+    <nav class="navbar">
+        <div class="navbar-content">
+            <h1>Admin Panel</h1>
+            <div class="nav-buttons">
+                <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for message in messages %}
+                        <div class="flash-message">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="card">
+            <h2>👥 User Management</h2>
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Password</th>
+                            <th>Role</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                            <tr>
+                                <td>{{ user[0] }}</td>
+                                <td>{{ user[1] }}</td>
+                                <td>
+                                    {% if user[2] %}
+                                        <span class="badge badge-success">Admin</span>
+                                    {% else %}
+                                        <span class="badge badge-error">User</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
 
-        <div class="section">
-            <h2>All Notes</h2>
-            <table>
-                <tr>
-                    <th>Username</th>
-                    <th>Content</th>
-                </tr>
-                {% for note in notes %}
-                <tr>
-                    <td>{{ note[0] }}</td>
-                    <!-- Intentionally vulnerable to XSS -->
-                    <td>{{ note[1] | safe }}</td>
-                </tr>
-                {% endfor %}
-            </table>
+        <div class="card">
+            <h2>📝 All Notes</h2>
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Content</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for note in notes %}
+                            <tr>
+                                <td>{{ note[0] }}</td>
+                                <td>{{ note[1] | safe }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-
-        <!-- Hidden super admin credentials -->
-        <!-- 
-            Super Admin Credentials:
-            Username: superadmin
-            Password: SuperSecretPass123!
-            Token: c3VwZXJhZG1pbjpzZWNyZXQ=
-        -->
     </div>
 </body>
 </html> 

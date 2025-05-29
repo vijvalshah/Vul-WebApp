@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Your Flags</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        .back-btn {
+            padding: 10px 20px;
+            background-color: #6c757d;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+        }
+        .challenges-section {
+            margin-top: 20px;
+        }
+        .challenge {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .challenge.solved {
+            border-left: 4px solid #28a745;
+        }
+        .challenge.unsolved {
+            border-left: 4px solid #dc3545;
+        }
+        .flag {
+            font-family: monospace;
+            font-size: 1.1em;
+            color: #28a745;
+            background-color: #f8f9fa;
+            padding: 5px 10px;
+            border-radius: 3px;
+            margin-top: 10px;
+            display: inline-block;
+        }
+        .status {
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        .solved-status {
+            color: #28a745;
+        }
+        .unsolved-status {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Your Flags</h1>
+            <a href="/dashboard" class="back-btn">Back to Dashboard</a>
+        </div>
+
+        <div class="challenges-section">
+            {% for challenge, flag in flags.items() %}
+                <div class="challenge {% if challenge in solved_challenges %}solved{% else %}unsolved{% endif %}">
+                    <h3>{{ challenge.replace('_', ' ').title() }}</h3>
+                    {% if challenge in solved_challenges %}
+                        <div class="status solved-status">✓ Solved</div>
+                        <div class="flag">{{ flag }}</div>
+                    {% else %}
+                        <div class="status unsolved-status">✗ Not solved yet</div>
+                        <div class="flag">???</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html> 
