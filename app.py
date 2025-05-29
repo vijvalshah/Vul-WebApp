@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 import sqlite3
 import os
@@ -24,7 +24,7 @@ FLAGS = {
 
 def init_db():
     try:
-        # Ensure the database file is closed and removed if it exists
+
         if os.path.exists(DATABASE):
             try:
                 os.remove(DATABASE)
@@ -45,7 +45,8 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS notes
                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
                      username TEXT NOT NULL,
-                     content TEXT NOT NULL)''')
+                     content TEXT NOT NULL,
+                     is_deletable BOOLEAN DEFAULT 1)''')
         
         # Create solved_challenges table
         c.execute('''CREATE TABLE IF NOT EXISTS solved_challenges
@@ -67,6 +68,23 @@ def init_db():
         
         c.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
                 ('cyscom', 'bifb3iub98#$dfs', False))
+
+
+        image_note = '<div style="text-align: center;"><h3>My Darkest Hours</h3><img src="/userdata/88382n2nbd92.png" alt="So pour out the gasoline" style="max-width: 100%; height: auto;"><p>Girl, I felt so alone inside of this crowded room</p></div>'
+        c.execute("INSERT INTO notes (username, content, is_deletable) VALUES (?, ?, ?)",
+                ('Unknown', image_note, False))
+
+        audio_note = '''<div style="text-align: center;">
+            <h3>Internal Meeting Recording - Confidential</h3>
+            <audio controls style="width: 100%; max-width: 500px;">
+                <source src="/userdata/internalmeet28-03-2025.wav" type="audio/wav">
+                Your browser does not support the audio element.
+            </audio>
+            <p style="color: black; margin-top: 10px;">No. The file is not corrupted.</p>
+            <p><a href="/userdata/internalmeet28-03-2025.wav" download class="btn btn-primary" style="display: inline-block; padding: 8px 16px; background: #4f46e5; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px;">Download Recording</a></p>
+        </div>'''
+        c.execute("INSERT INTO notes (username, content, is_deletable) VALUES (?, ?, ?)",
+                ('user', audio_note, False))
         
         conn.commit()
         conn.close()
@@ -293,14 +311,13 @@ def admin_panel():
         conn = get_db()
         c = conn.cursor()
         users = c.execute("SELECT username, password, is_admin FROM users").fetchall()
-        notes = c.execute("SELECT username, content FROM notes").fetchall()
         conn.close()
         
         # Mark admin panel challenge as solved only when accessing admin panel
         if mark_challenge_solved(session['username'], 'admin_panel'):
             flash(f"Congratulations! You accessed the admin panel! Flag: {FLAGS['admin_panel']}")
         
-        return render_template('admin.html', users=users, notes=notes)
+        return render_template('admin.html', users=users)
     return "Unauthorized", 403
 
 @app.route('/api/check_admin')
@@ -324,10 +341,10 @@ def clear_notes():
     try:
         conn = get_db()
         c = conn.cursor()
-        c.execute("DELETE FROM notes WHERE username=?", (session['username'],))
+        c.execute("DELETE FROM notes WHERE username=? AND is_deletable=1", (session['username'],))
         conn.commit()
         conn.close()
-        flash("All notes have been cleared!")
+        flash("All deletable notes have been cleared!")
     except Exception as e:
         flash(f"Error clearing notes: {str(e)}")
     
@@ -377,6 +394,17 @@ def api_backup():
 @app.route('/api/v1/debug')
 def api_debug():
     return jsonify({'error': 'Debug mode disabled in production'}), 503
+
+# Add route to serve files from userdata directory
+@app.route('/userdata/<path:filename>')
+def serve_userdata(filename):
+    return send_from_directory('userdata', filename)
+
+@app.route('/discussions')
+def discussions():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    return render_template('discussions.html')
 
 if __name__ == '__main__':
     init_db()  # Initialize database when starting the app

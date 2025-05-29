@@ -54,15 +54,8 @@
             border: none;
             color: white;
             text-decoration: none;
-            transition: opacity 0.2s;
-        }
-
-        .btn:hover {
-            opacity: 0.9;
-        }
-
-        .btn-primary {
             background-color: var(--primary-color);
+            transition: opacity 0.2s;
         }
 
         .container {
@@ -101,52 +94,42 @@
             gap: 0.5rem;
         }
 
-        .table {
+        table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 1rem;
         }
 
-        .table th,
-        .table td {
+        th, td {
             padding: 0.75rem;
             text-align: left;
             border-bottom: 1px solid #e5e7eb;
         }
 
-        .table th {
+        th {
             background-color: #f8fafc;
             font-weight: 600;
-            color: #4b5563;
-        }
-
-        .table tr:last-child td {
-            border-bottom: none;
         }
 
         .badge {
-            display: inline-block;
             padding: 0.25rem 0.5rem;
-            border-radius: 9999px;
+            border-radius: 0.25rem;
             font-size: 0.75rem;
             font-weight: 500;
+            text-transform: uppercase;
         }
 
-        .badge-success {
-            background-color: #d1fae5;
-            color: #065f46;
+        .badge-admin {
+            background-color: var(--success-color);
+            color: white;
         }
 
-        .badge-error {
-            background-color: #fee2e2;
-            color: #991b1b;
+        .badge-user {
+            background-color: #e5e7eb;
+            color: #4b5563;
         }
 
         @media (max-width: 640px) {
-            .table-container {
-                overflow-x: auto;
-            }
-
             .navbar-content {
                 flex-direction: column;
                 gap: 1rem;
@@ -165,7 +148,7 @@
         <div class="navbar-content">
             <h1>Admin Panel</h1>
             <div class="nav-buttons">
-                <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
+                <a href="/dashboard" class="btn">Back to Dashboard</a>
             </div>
         </div>
     </nav>
@@ -182,56 +165,35 @@
         {% endwith %}
 
         <div class="card">
-            <h2>👥 User Management</h2>
-            <div class="table-container">
-                <table class="table">
-                    <thead>
+            <h2>👥 Registered Users</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Password</th>
+                        <th>Role</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
                         <tr>
-                            <th>Username</th>
-                            <th>Password</th>
-                            <th>Role</th>
+                            <td>{{ user[0] }}</td>
+                            <td><code>{{ user[1] }}</code></td>
+                            <td>
+                                {% if user[2] %}
+                                    <span class="badge badge-admin">Admin</span>
+                                {% else %}
+                                    <span class="badge badge-user">User</span>
+                                {% endif %}
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for user in users %}
-                            <tr>
-                                <td>{{ user[0] }}</td>
-                                <td>{{ user[1] }}</td>
-                                <td>
-                                    {% if user[2] %}
-                                        <span class="badge badge-success">Admin</span>
-                                    {% else %}
-                                        <span class="badge badge-error">User</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
 
-        <div class="card">
-            <h2>📝 All Notes</h2>
-            <div class="table-container">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Username</th>
-                            <th>Content</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for note in notes %}
-                            <tr>
-                                <td>{{ note[0] }}</td>
-                                <td>{{ note[1] | safe }}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+        <!-- Hidden hint for privilege escalation -->
+        <!-- Try accessing this panel with admin credentials or token manipulation -->
     </div>
 </body>
 </html> 
