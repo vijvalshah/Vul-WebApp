@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>About Us - CTF Challenge</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --primary-color: #4f46e5;
+            --text-color: #1f2937;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            min-height: 100vh;
+        }
+
+        .navbar {
+            background-color: var(--card-bg);
+            padding: 1rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        .navbar-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            color: white;
+            text-decoration: none;
+            transition: opacity 0.2s;
+            background-color: var(--primary-color);
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .section {
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            color: var(--text-color);
+            margin-bottom: 1rem;
+        }
+
+        p {
+            line-height: 1.6;
+            margin-bottom: 1rem;
+            color: #4b5563;
+        }
+
+        .team-member {
+            padding: 1rem;
+            background-color: #f8fafc;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .secret-note {
+            color: transparent;
+            user-select: none;
+        }
+
+        .secret-note:hover {
+            color: #4b5563;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-content">
+            <h1>About Us</h1>
+            <div class="nav-buttons">
+                <a href="/dashboard" class="btn">Back to Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="section">
+            <h1>Our Mission</h1>
+            <p>We strive to create the most secure web applications possible. Our team of experts works tirelessly to ensure that every line of code is thoroughly tested and protected against all forms of cyber attacks.</p>
+            <!-- Note to dev: Remember to remove testing credentials before production -->
+            <!-- test:test123 -->
+        </div>
+
+        <div class="section">
+            <h1>Our Team</h1>
+            <div class="team-member">
+                <h3>Aakansh Gupta</h3>
+                <p>Cyscom Interim Tech Lead</p>
+                <p class="secret-note">Note: Try base64 maybe?</p>
+            </div>
+            <div class="team-member">
+                <h3>Om Mishra</h3>
+                <p>Cyscom Interim Tech Lead</p>
+                <!-- Base64? VGhpcyBpcyBub3QgdGhlIGZsYWcgeW91J3JlIGxvb2tpbmcgZm9y -->
+            </div>
+            <div class="team-member">
+                <h3>Vijval Shah</h3>
+                <p>Just some random guy</p>
+                <p style="font-size: 1px; color: #ffffff;">Backup database password: SuperSecurePass123!</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h1>Security Certifications</h1>
+            <p>Our application has been certified by multiple security organizations:</p>
+            <ul>
+                <li>ISO 27001:2013</li>
+                <li>SOC 2 Type II</li>
+                <li>OSWAP Cybersecurity Framework</li>
+            </ul>
+            <!-- TODO: Update certification numbers
+                 ISO: 45791337
+                 SOC: 98765-ABCD
+                 NIST: CYSM{NOT_A_REAL_FLAG}
+            -->
+        </div>
+
+        <div class="section" style="display: none;">
+            <!-- Emergency access: /backup_login.php -->
+            <!-- Maintenance mode password: M41nt3n4nc3@2023 -->
+        </div>
+    </div>
+</body>
+</html> 

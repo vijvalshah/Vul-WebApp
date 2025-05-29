@@ -333,6 +333,51 @@ def clear_notes():
     
     return redirect(url_for('dashboard'))
 
+@app.route('/about')
+def about():
+    return render_template('about.html')
+
+@app.route('/docs')
+def docs():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    if not session.get('is_admin'):
+        return "Unauthorized - Admin access required", 403
+    return render_template('docs.html')
+
+@app.route('/api/v1/users')
+def api_users():
+    return jsonify({'error': 'Endpoint deprecated for security reasons'}), 403
+
+@app.route('/api/v1/backup')
+def api_backup():
+    token = request.args.get('token', '')
+    
+    # Check if token is base64 encoded
+    try:
+        decoded_token = base64.b64decode(token).decode('utf-8')
+        username, timestamp = decoded_token.split(':')
+        
+        if username == 'admin':
+            # Mark the hidden info challenge as solved if user is logged in
+            if session.get('logged_in'):
+                if mark_challenge_solved(session['username'], 'hidden_info'):
+                    flash(f"Congratulations! You found the hidden backup endpoint! Flag: {FLAGS['hidden_info']}")
+            
+            return render_template('backup_response.html', 
+                                success=True,
+                                flag=FLAGS['hidden_info'])
+    except:
+        pass
+    
+    return render_template('backup_response.html',
+                         success=False,
+                         error_message="Invalid backup token.")
+
+@app.route('/api/v1/debug')
+def api_debug():
+    return jsonify({'error': 'Debug mode disabled in production'}), 503
+
 if __name__ == '__main__':
     init_db()  # Initialize database when starting the app
     app.run(debug=True)  # Debug mode enabled intentionally 

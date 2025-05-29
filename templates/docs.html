@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Internal Documentation - CTF Challenge</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --primary-color: #4f46e5;
+            --text-color: #1f2937;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --code-bg: #1f2937;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            min-height: 100vh;
+        }
+
+        .navbar {
+            background-color: var(--card-bg);
+            padding: 1rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        .navbar-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            color: white;
+            text-decoration: none;
+            transition: opacity 0.2s;
+            background-color: var(--primary-color);
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .section {
+            margin-bottom: 2rem;
+        }
+
+        h1, h2 {
+            color: var(--text-color);
+            margin-bottom: 1rem;
+        }
+
+        p {
+            line-height: 1.6;
+            margin-bottom: 1rem;
+            color: #4b5563;
+        }
+
+        pre {
+            background-color: var(--code-bg);
+            color: #e5e7eb;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin-bottom: 1rem;
+        }
+
+        code {
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .warning {
+            background-color: #fee2e2;
+            border: 1px solid #fecaca;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .note {
+            background-color: #e0f2fe;
+            border: 1px solid #bae6fd;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1rem;
+        }
+
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        th {
+            background-color: #f8fafc;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-content">
+            <h1>Internal Documentation</h1>
+            <div class="nav-buttons">
+                <a href="/dashboard" class="btn">Back to Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="warning">
+            ⚠️ Internal documentation - For development team use only
+        </div>
+
+        <div class="section">
+            <h2>API Endpoints</h2>
+            <table>
+                <tr>
+                    <th>Endpoint</th>
+                    <th>Method</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td>/api/v1/users</td>
+                    <td>GET</td>
+                    <td>List all users (Deprecated - Security risk)</td>
+                </tr>
+                <tr>
+                    <td>/api/v1/backup</td>
+                    <td>POST</td>
+                    <td>Create database backup (Requires admin token)</td>
+                </tr>
+                <tr>
+                    <td>/api/v1/debug</td>
+                    <td>GET</td>
+                    <td>Debug information (Disabled in production)</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Development Notes</h2>
+            <div class="note">
+                <p>🔑 API Keys are stored in <code>/var/www/keys.conf</code></p>
+                <p>🔒 Default admin credentials are in <code>config/secrets.yml</code></p>
+                <p>⚡ Debug mode is enabled on port 31337</p>
+                <p>💡 Session tokens use base64 encoding: username:timestamp</p>
+            </div>
+            <pre><code># Example configuration
+ADMIN_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+DEBUG_KEY=CYSM{g5ibbesd391dqx2#1}
+API_SECRET=8675309-JENNY
+
+# Session token example (DO NOT USE IN PRODUCTION!)
+echo -n "user:timestamp" | base64  # Results in dXNlcjp0aW1lc3RhbXA=</code></pre>
+        </div>
+
+        <div class="section">
+            <h2>Known Issues</h2>
+            <ul>
+                <li>Session tokens not properly validated (Low priority)</li>
+                <li>SQL queries need parameterization (Medium priority)</li>
+                <li>XSS vulnerability in note system (High priority)</li>
+                <li>Admin panel accessible via token manipulation (High priority)</li>
+                <li>Hidden API endpoints may expose sensitive data (High priority)</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>API Testing</h2>
+            <p>Test our API endpoints with these commands:</p>
+            <pre><code># List all API endpoints
+curl http://localhost:5000/api/v1/users
+curl http://localhost:5000/api/v1/debug
+
+# Access backup system (requires base64 encoded admin token)
+# Token format: username:timestamp
+# Example: echo -n "admin:1234567890" | base64
+curl http://localhost:5000/api/v1/backup?token=YOUR_BASE64_TOKEN</code></pre>
+        </div>
+
+        <div class="section">
+            <h2>Backup Procedures</h2>
+            <p>Database backups are stored in:</p>
+            <pre><code>/var/backups/db/
+├── backup_2023.sql
+├── backup_2024.sql
+└── secret_stuff.txt</code></pre>
+        </div>
+
+        <div style="display: none;">
+            <!-- Legacy system access: telnet://localhost:1337 -->
+            <!-- SSH key password: Tr0ub4dor&3 -->
+            <!-- Flag format: CYSM{...} -->
+        </div>
+    </div>
+</body>
+</html> 
