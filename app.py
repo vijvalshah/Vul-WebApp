@@ -13,16 +13,29 @@ app.secret_key = 'supersecretkey123'  # Intentionally weak secret key
 # Vulnerable Database Setup
 DATABASE = 'users.db'
 
-# Flag definitions
+# Flag definitions with challenge display names
+CHALLENGE_NAMES = {
+    'sql_injection': 'SQL Injection',
+    'privilege_escalation': 'Privilege Escalation as Real Admin',
+    'session_token': 'Session Token',
+    'stored_xss': 'Stored XSS',
+    'admin_panel': 'Admin Panel',
+    'hidden_info': 'Hidden Info',
+    'idor': 'IDOR',
+    'ssti': 'SSTI',
+    'osint': 'Lost User'
+}
+
 FLAGS = {
-    'sql_injection': 'CYSM{sql_in-j3-ct-10-n}',
+    'sql_injection': 'CYSM{sql_iNj3ct-10n}',
     'privilege_escalation': 'CYSM{pr1v1l3g3@escal}',
     'session_token': 'CYSM{s355i0N&Token}',
     'stored_xss': 'CYSM{S70*Xs5}',
     'admin_panel': 'CYSM{4DMINc0n-s0-1}',
     'hidden_info': 'CYSM{cr4ckedbyWH0?}',
     'idor': 'CYSM{n0t3-Sn1ff3r}',
-    'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}'
+    'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}',
+    'osint': 'CYSM{Th15-4cc0unt-d035nt-3X1St}'
 }
 
 def init_db():
@@ -72,6 +85,9 @@ def init_db():
         c.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
                 ('cyscom', 'bifb3iub98#$dfs', False))
 
+        # Add new user 'om'
+        c.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
+                ('om', '210805', False))
 
         image_note = '<div style="text-align: center;"><h3>My Darkest Hours</h3><img src="/userdata/88382n2nbd92.png" alt="So pour out the gasoline" style="max-width: 100%; height: auto;"><p>Girl, I felt so alone inside of this crowded room</p></div>'
         c.execute("INSERT INTO notes (username, content, is_deletable) VALUES (?, ?, ?)",
@@ -111,7 +127,6 @@ def get_db():
         return None
 
 def generate_session_token(username):
-    # Intentionally weak session token generation
     timestamp = str(int(time.time()))
     token = base64.b64encode(f"{username}:{timestamp}".encode()).decode()
     return token
@@ -120,7 +135,6 @@ def mark_challenge_solved(username, challenge_name):
     try:
         conn = get_db()
         c = conn.cursor()
-        # Check if already solved
         result = c.execute(
             "SELECT id FROM solved_challenges WHERE username=? AND challenge_name=?",
             (username, challenge_name)
@@ -237,18 +251,59 @@ def flags():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    # Get solved challenges
-    solved_challenges = get_solved_challenges(session['username'])
+    # Special handling for 'om' account
+    if session['username'] == 'om':
+        return render_template_string('''
+            <div style="max-width: 800px; margin: 2rem auto; padding: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h2 style="color: #4f46e5; margin-bottom: 1rem;">🏆 Solved Challenges</h2>
+                <div style="background: #f3f4f6; padding: 1.5rem; border-radius: 0.5rem; margin-bottom: 1.5rem;">
+                    <div style="border: 1px solid #d1d5db; border-radius: 0.375rem; padding: 1rem; margin-bottom: 1rem;">
+                        <h3 style="color: #374151; font-size: 1.1rem; margin-bottom: 0.5rem;">Lost User</h3>
+                        <p style="color: #6b7280; font-family: monospace; background: #e5e7eb; padding: 0.5rem; border-radius: 0.25rem;">
+                            {{ flag }}
+                        </p>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 1rem;">
+                    <a href="/dashboard" style="text-decoration: none; padding: 0.5rem 1rem; background: #4f46e5; color: white; border-radius: 0.375rem;">Back to Dashboard</a>
+                    <a href="/logout" style="text-decoration: none; padding: 0.5rem 1rem; background: #ef4444; color: white; border-radius: 0.375rem;">Logout</a>
+                </div>
+            </div>
+        ''', flag=FLAGS['osint'])
     
+    # Get solved challenges for other accounts
+    solved_challenges = get_solved_challenges(session['username'])
     return render_template('flags.html', 
                          username=session['username'],
                          solved_challenges=solved_challenges,
-                         flags=FLAGS)
+                         flags=FLAGS,
+                         challenge_names=CHALLENGE_NAMES)
 
 @app.route('/dashboard')
 def dashboard():
     if 'username' not in session:
         return redirect(url_for('login'))
+    
+    # Special handling for 'om' account
+    if session['username'] == 'om':
+        return render_template_string('''
+            <div style="max-width: 800px; margin: 2rem auto; padding: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h2 style="color: #4f46e5; margin-bottom: 1rem;">Account Status: Scheduled for Deletion</h2>
+                <div style="background: #f3f4f6; padding: 1.5rem; border-radius: 0.5rem; margin-bottom: 1.5rem;">
+                    <p style="color: #374151; margin-bottom: 1rem;">
+                        This account was marked for deletion by user request on 28-03-2024.
+                        All notes and files have been removed as per deletion protocol. You can still view the flags this account has solved.
+                    </p>
+                    <p style="color: #6b7280;">
+                        Account will be permanently removed from our systems within 30 days.
+                    </p>
+                </div>
+                <div style="display: flex; gap: 1rem;">
+                    <a href="/flags" style="text-decoration: none; padding: 0.5rem 1rem; background: #4f46e5; color: white; border-radius: 0.375rem;">View Flags</a>
+                    <a href="/logout" style="text-decoration: none; padding: 0.5rem 1rem; background: #ef4444; color: white; border-radius: 0.375rem;">Logout</a>
+                </div>
+            </div>
+        ''')
     
     db = get_db()
     c = db.cursor()

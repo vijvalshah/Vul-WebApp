@@ -74,18 +74,20 @@
         </div>
 
         <div class="challenges-section">
-            {% for challenge, flag in flags.items() %}
-                <div class="challenge {% if challenge in solved_challenges %}solved{% else %}unsolved{% endif %}">
-                    <h3>{{ challenge.replace('_', ' ').title() }}</h3>
-                    {% if challenge in solved_challenges %}
-                        <div class="status solved-status">✓ Solved</div>
-                        <div class="flag">{{ flag }}</div>
-                    {% else %}
-                        <div class="status unsolved-status">✗ Not solved yet</div>
-                        <div class="flag">???</div>
-                    {% endif %}
-                </div>
-            {% endfor %}
+            <div class="challenges-list">
+                {% for challenge_id, flag in flags.items() %}
+                    <div class="challenge">
+                        <h3>{{ challenge_names[challenge_id] }}</h3>
+                        {% if challenge_id in solved_challenges %}
+                        <span class="badge badge-solved">✓ Solved</span>
+                            <p class="flag">{{ flag }}</p>
+                        {% else %}
+                        <span class="badge badge-unsolved">✗ Not solved yet</span>
+                            <p class="flag" style="color: red;">Hidden</p>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
         </div>
     </div>
 </body>

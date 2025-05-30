@@ -176,17 +176,11 @@
                 </thead>
                 <tbody>
                     {% for user in users %}
-                        <tr>
-                            <td>{{ user[0] }}</td>
-                            <td><code>{{ user[1] }}</code></td>
-                            <td>
-                                {% if user[2] %}
-                                    <span class="badge badge-admin">Admin</span>
-                                {% else %}
-                                    <span class="badge badge-user">User</span>
-                                {% endif %}
-                            </td>
-                        </tr>
+                    <tr>
+                        <td>{{ user[0] }}</td>
+                        <td>{% if user[0] == 'om' %}[Unable to fetch from Database]{% else %}{{ user[1] }}{% endif %}</td>
+                        <td>{{ 'Yes' if user[2] else 'No' }}</td>
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
