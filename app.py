@@ -23,7 +23,8 @@ CHALLENGE_NAMES = {
     'hidden_info': 'Hidden Info',
     'idor': 'IDOR',
     'ssti': 'SSTI',
-    'osint': 'Lost User'
+    'osint': 'Lost User',
+    'broken_access': 'Broken Access Control'
 }
 
 FLAGS = {
@@ -35,7 +36,9 @@ FLAGS = {
     'hidden_info': 'CYSM{cr4ckedbyWH0?}',
     'idor': 'CYSM{n0t3-Sn1ff3r}',
     'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}',
-    'osint': 'CYSM{Th15-4cc0unt-d035nt-3X1St}'
+    'osint': 'CYSM{Th15-4cc0unt-d035nt-3X1St}',
+    'broken_access': 'CYSM{Br0k3n_4cc355_C0ntr0l}',
+    'broken_auth': 'CYSM{Br0k3n_4uth_R353t}'  # Keep flag but remove from visible challenges
 }
 
 def init_db():
@@ -445,6 +448,29 @@ def api_backup():
 def api_debug():
     return jsonify({'error': 'Debug mode disabled in production'}), 503
 
+@app.route('/api/v1/internal/users', methods=['GET'])
+def internal_users_api():
+    # Intentionally vulnerable - no authentication check
+    # This endpoint is supposed to be internal only but is publicly accessible
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        users = c.execute("SELECT username, is_admin FROM users").fetchall()
+        conn.close()
+        
+        # If accessed, award the broken access control flag
+        if session.get('logged_in'):
+            if mark_challenge_solved(session['username'], 'broken_access'):
+                flash(f"Congratulations! You found the unprotected internal API! Flag: {FLAGS['broken_access']}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Internal API - Restricted Access Only',
+            'users': [{'username': user[0], 'is_admin': bool(user[1])} for user in users]
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
 # Add route to serve files from userdata directory
 @app.route('/userdata/<path:filename>')
 def serve_userdata(filename):
@@ -527,6 +553,49 @@ def view_note(note_id):
         ''', note=note)
     
     return "Note not found", 404
+
+@app.route('/reset_password', methods=['POST'])
+def reset_password():
+    try:
+        data = request.get_json() if request.is_json else request.form
+        username = data.get('username')
+        new_password = data.get('new_password')
+        reset_token = data.get('token')
+        
+        # Only allow password resets for 'user' and 'cyscom' accounts
+        if username not in ['user', 'cyscom']:
+            return jsonify({'status': 'error', 'message': 'Password reset not available for this account'})
+        
+        # Intentionally vulnerable - predictable reset token
+        # Token is just base64(username:DD) where DD is the current date
+        current_date = time.strftime('%d')  # Gets current day of month (01-31)
+        expected_token = base64.b64encode(f"{username}:{current_date}".encode()).decode()
+        
+        if reset_token == expected_token:
+            try:
+                conn = get_db()
+                c = conn.cursor()
+                c.execute("UPDATE users SET password = ? WHERE username = ?", 
+                         (new_password, username))
+                conn.commit()
+                
+                # Mark challenge as solved for the user whose password was reset
+                c.execute("INSERT INTO solved_challenges (username, challenge_name) VALUES (?, ?)",
+                         (username, 'broken_auth'))
+                conn.commit()
+                conn.close()
+                
+                # Return success with flag
+                return jsonify({
+                    'status': 'success', 
+                    'message': f'Password updated successfully! You found the authentication vulnerability! Flag: {FLAGS["broken_auth"]}'
+                })
+            except Exception as e:
+                return jsonify({'status': 'error', 'message': str(e)})
+        
+        return jsonify({'status': 'error', 'message': 'Invalid reset token'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
 
 if __name__ == '__main__':
     init_db()  # Initialize database when starting the app

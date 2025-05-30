@@ -151,7 +151,7 @@
                     <th>Description</th>
                 </tr>
                 <tr>
-                    <td>/api/v1/users</td>
+                    <td>/api/v1/internal/users</td>
                     <td>GET</td>
                     <td>List all users (Deprecated - Security risk)</td>
                 </tr>
@@ -200,8 +200,8 @@ echo -n "user:timestamp" | base64  # Results in dXNlcjp0aW1lc3RhbXA=</code></pre
             <h2>API Testing</h2>
             <p>Test our API endpoints with these commands:</p>
             <pre><code># List all API endpoints
-curl http://localhost:5000/api/v1/users
-curl http://localhost:5000/api/v1/debug
+curl http://localhost:5000/api/v1/internal/users
+curl http://localhost:5000/api/v1/internal/debug
 
 # Access backup system (requires base64 encoded admin token)
 # Token format: username:timestamp

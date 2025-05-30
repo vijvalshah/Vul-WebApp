@@ -186,6 +186,59 @@
 
             <button type="submit" class="submit-btn">Sign In</button>
         </form>
+
+        <!-- Add forgot password section -->
+        <div style="margin-top: 20px; text-align: center;">
+            <a href="#" onclick="toggleForgotPassword()" style="color: #4f46e5; text-decoration: none;">Forgot Password?</a>
+        </div>
+        <div id="forgotPasswordForm" style="display: none; margin-top: 20px;">
+            <h3>Reset Password</h3>
+            <form id="resetForm" onsubmit="resetPassword(event)">
+                <input type="text" name="username" placeholder="Username" required>
+                <input type="password" name="new_password" placeholder="New Password" required>
+                <input type="text" name="token" placeholder="Reset Token" required>
+                <button type="submit">Reset Password</button>
+            </form>
+            <p style="color: #6b7280; font-size: 0.875rem; margin-top: 10px;">
+                Contact support to get your reset token.
+            </p>
+        </div>
+        <script>
+            function toggleForgotPassword() {
+                const form = document.getElementById('forgotPasswordForm');
+                form.style.display = form.style.display === 'none' ? 'block' : 'none';
+            }
+            
+            function resetPassword(event) {
+                event.preventDefault();
+                const form = event.target;
+                const data = {
+                    username: form.username.value,
+                    new_password: form.new_password.value,
+                    token: form.token.value
+                };
+                
+                fetch('/reset_password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert(data.message);
+                        location.reload();
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error);
+                });
+            }
+        </script>
     </div>
 </body>
 </html> 
