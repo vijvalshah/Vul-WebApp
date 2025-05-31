@@ -17,28 +17,27 @@ DATABASE = 'users.db'
 CHALLENGE_NAMES = {
     'sql_injection': 'SQL Injection',
     'privilege_escalation': 'Privilege Escalation as Real Admin',
-    'session_token': 'Session Token',
     'stored_xss': 'Stored XSS',
     'admin_panel': 'Admin Panel',
     'hidden_info': 'Hidden Info',
     'idor': 'IDOR',
     'ssti': 'SSTI',
     'osint': 'Lost User',
-    'broken_access': 'Broken Access Control'
+    'broken_access': 'Broken Access Control',
+    'broken_auth': 'Broken Authentication'
 }
 
 FLAGS = {
     'sql_injection': 'CYSM{sql_iNj3ct-10n}',
     'privilege_escalation': 'CYSM{pr1v1l3g3@escal}',
-    'session_token': 'CYSM{s355i0N&Token}',
     'stored_xss': 'CYSM{S70*Xs5}',
     'admin_panel': 'CYSM{4DMINc0n-s0-1}',
     'hidden_info': 'CYSM{cr4ckedbyWH0?}',
     'idor': 'CYSM{n0t3-Sn1ff3r}',
     'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}',
     'osint': 'CYSM{Th15-4cc0unt-d035nt-3X1St}',
-    'broken_access': 'CYSM{Br0k3n_4cc355_C0ntr0l}',
-    'broken_auth': 'CYSM{Br0k3n_4uth_R353t}'  # Keep flag but remove from visible challenges
+    'broken_access': 'CYSM{Br0k3_my_4cc355\C0ntr0l}',
+    'broken_auth': 'CYSM{Br0k3N=P45S_R353t}'  # Keep flag but remove from visible challenges
 }
 
 def init_db():
@@ -350,62 +349,20 @@ def admin_panel():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
 
-    # First check if user is actually admin (through database)
+    # Check if user is actually admin
     if not session.get('is_admin'):
         return "Unauthorized - Admin access required", 403
-        
-    # Then check for token-based vulnerability (intentional)
-    if session.get('token', '').startswith('YWRtaW4'):  # base64 of 'admin'
-        # Mark session token challenge as solved if accessed through token manipulation
-        if not session.get('is_admin') and session.get('logged_in'):
-            if mark_challenge_solved(session['username'], 'session_token'):
-                flash(f"Congratulations! You solved the Session Token challenge! Flag: {FLAGS['session_token']}")
-        
-        conn = get_db()
-        c = conn.cursor()
-        users = c.execute("SELECT username, password, is_admin FROM users").fetchall()
-        conn.close()
-        
-        # Mark admin panel challenge as solved only when accessing admin panel
-        if mark_challenge_solved(session['username'], 'admin_panel'):
-            flash(f"Congratulations! You accessed the admin panel! Flag: {FLAGS['admin_panel']}")
-        
-        return render_template('admin.html', users=users)
-    return "Unauthorized", 403
-
-@app.route('/api/check_admin')
-def check_admin():
-    # Intentionally vulnerable endpoint that reveals admin check logic
-    token = request.args.get('token', '')
-    is_admin = token.startswith('YWRtaW4')
     
-    # Mark hidden info challenge as solved if this endpoint is accessed
-    if session.get('logged_in'):
-        if mark_challenge_solved(session['username'], 'hidden_info'):
-            flash(f"Congratulations! You found a hidden endpoint! Flag: {FLAGS['hidden_info']}")
+    conn = get_db()
+    c = conn.cursor()
+    users = c.execute("SELECT username, password, is_admin FROM users").fetchall()
+    conn.close()
     
-    return jsonify({'is_admin': is_admin})
-
-@app.route('/clear_notes')
-def clear_notes():
-    if not session.get('logged_in'):
-        return redirect(url_for('login'))
+    # Mark admin panel challenge as solved only when accessing admin panel
+    if mark_challenge_solved(session['username'], 'admin_panel'):
+        flash(f"Congratulations! You accessed the admin panel! Flag: {FLAGS['admin_panel']}")
     
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("DELETE FROM notes WHERE username=? AND is_deletable=1", (session['username'],))
-        conn.commit()
-        conn.close()
-        flash("All deletable notes have been cleared!")
-    except Exception as e:
-        flash(f"Error clearing notes: {str(e)}")
-    
-    return redirect(url_for('dashboard'))
-
-@app.route('/about')
-def about():
-    return render_template('about.html')
+    return render_template('admin.html', users=users)
 
 @app.route('/docs')
 def docs():
@@ -596,6 +553,27 @@ def reset_password():
         return jsonify({'status': 'error', 'message': 'Invalid reset token'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/clear_notes')
+def clear_notes():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM notes WHERE username=? AND is_deletable=1", (session['username'],))
+    conn.commit()
+    conn.close()
+    
+    flash("All deletable notes have been cleared!")
+    return redirect(url_for('dashboard'))
+
+@app.route('/about')
+def about():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    return render_template('about.html')
 
 if __name__ == '__main__':
     init_db()  # Initialize database when starting the app

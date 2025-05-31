@@ -191,13 +191,13 @@
         <div style="margin-top: 20px; text-align: center;">
             <a href="#" onclick="toggleForgotPassword()" style="color: #4f46e5; text-decoration: none;">Forgot Password?</a>
         </div>
-        <div id="forgotPasswordForm" style="display: none; margin-top: 20px;">
+        <div id="forgotPasswordForm" class="form-group" style="display: none; margin-top: 20px;">
             <h3>Reset Password</h3>
             <form id="resetForm" onsubmit="resetPassword(event)">
                 <input type="text" name="username" placeholder="Username" required>
                 <input type="password" name="new_password" placeholder="New Password" required>
                 <input type="text" name="token" placeholder="Reset Token" required>
-                <button type="submit">Reset Password</button>
+                <button type="submit" class="submit-btn">Reset Password</button>
             </form>
             <p style="color: #6b7280; font-size: 0.875rem; margin-top: 10px;">
                 Contact support to get your reset token.
