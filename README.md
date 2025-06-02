@@ -32,7 +32,7 @@ The application will be available at `http://localhost:5000`
 
 4. **Admin Panel Vulnerabilities**
 
-5. **Session token/idor**
+5. **IDOR**
 
 6. **Weak Authentication**
 
@@ -45,3 +45,5 @@ The application will be available at `http://localhost:5000`
 10. **Fake Pages**
 
 11. **Server-Side Template Injection vulnerability**
+
+12. **Broken Authentication**
