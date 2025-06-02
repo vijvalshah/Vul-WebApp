@@ -6,12 +6,182 @@ import base64
 import time
 import re
 from flask import render_template_string
+from werkzeug.security import generate_password_hash, check_password_hash
+import random
+import string
+from datetime import datetime
+import glob
+import requests
 
 app = Flask(__name__)
-app.secret_key = 'supersecretkey123'  # Intentionally weak secret key
+app.secret_key = 'your_secret_key_here'  # Change this to a secure secret key
 
-# Vulnerable Database Setup
-DATABASE = 'users.db'
+# Create instance folder if it doesn't exist
+if not os.path.exists('instance'):
+    os.makedirs('instance')
+
+# Global variable to store admin password for each IP
+ip_admin_passwords = {}
+
+def count_db_files():
+    """Count and list all database files in instance folder"""
+    db_files = glob.glob(os.path.join('instance', 'users_*.db'))
+    print(f"\nTotal .db files in instance folder: {len(db_files)}")
+    for db_file in db_files:
+        print(f"Found database: {db_file}")
+    return len(db_files)
+
+def get_real_ip():
+    """Get the real client IP address using only ipify"""
+    # If we already detected the real IP in this session, use it
+    if 'real_ip' in session:
+        return session['real_ip']
+    
+    # Get IP from ipify
+    try:
+        response = requests.get('https://api.ipify.org?format=json', timeout=3)
+        if response.status_code == 200:
+            ip = response.json()['ip']
+            session['real_ip'] = ip
+            print(f"Got real IP {ip} from ipify")
+            return ip
+    except Exception as e:
+        print(f"Failed to get IP from ipify: {str(e)}")
+    
+    # If ipify fails, use remote_addr as fallback
+    ip = request.remote_addr
+    session['real_ip'] = ip
+    print(f"Using fallback IP: {ip}")
+    return ip
+
+def get_user_db_path(ip=None):
+    """Get database path specific to user's IP address"""
+    if ip is None:
+        if request:
+            ip = get_real_ip()
+        else:
+            ip = 'default'
+    
+    safe_ip = ip.replace('.', '_').replace(':', '_')  # Sanitize IP for filename
+    db_path = os.path.join('instance', f'users_{safe_ip}.db')
+    print(f"\nAccessing database for IP: {ip}")
+    print(f"Database path: {db_path}")
+    return db_path
+
+def init_user_db(db_path, ip=None):
+    """Initialize a new database for a specific path"""
+    if ip is None and request:
+        ip = get_real_ip()
+    
+    print(f"\nInitializing new database for IP: {ip}")
+    print(f"Creating database at: {db_path}")
+    
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+
+    # Create tables
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT UNIQUE NOT NULL,
+                  password TEXT NOT NULL,
+                  is_admin INTEGER DEFAULT 0)''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS notes
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT NOT NULL,
+                  title TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  is_deletable INTEGER DEFAULT 1)''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS solved_challenges
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT NOT NULL,
+                  challenge_name TEXT NOT NULL,
+                  solved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+
+    # Generate random passwords for admin and cyscom
+    admin_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    cyscom_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    
+    # Store admin password for this IP
+    if ip:
+        ip_admin_passwords[ip] = admin_password
+
+    # Insert users with original passwords for user, unknown, and om
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
+             ('admin', admin_password, 1))
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
+             ('user', 'password123', 0))
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
+             ('Unknown', 'Th3w3eknd15th3be35T', 0))
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
+             ('cyscom', cyscom_password, 0))
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
+             ('om', '210805', 0))
+
+    # Add the non-deletable notes
+    image_note = '<div style="text-align: center;"><h3>My Darkest Hours</h3><img src="/userdata/88382n2nbd92.png" alt="So pour out the gasoline" style="max-width: 100%; height: auto;"><p>Girl, I felt so alone inside of this crowded room</p></div>'
+    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
+             ('Unknown', 'Important Notice', image_note, 0))
+
+    audio_note = '''<div style="text-align: center;">
+        <h3>Internal Meeting Recording - Confidential</h3>
+        <audio controls style="width: 100%; max-width: 500px;">
+            <source src="/userdata/internalmeet28-03-2025.wav" type="audio/wav">
+            Your browser does not support the audio element.
+        </audio>
+        <p style="color: black; margin-top: 10px;">No. The file is not corrupted.</p>
+        <p><a href="/userdata/internalmeet28-03-2025.wav" download class="btn btn-primary" style="display: inline-block; padding: 8px 16px; background: #4f46e5; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px;">Download Recording</a></p>
+    </div>'''
+    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
+             ('user', 'Internal Meeting Recording', audio_note, 0))
+
+    conn.commit()
+    conn.close()
+
+    print(f"Database initialized successfully")
+    print(f"Admin password for IP {ip}: {admin_password}")
+    print(f"Cyscom password for IP {ip}: {cyscom_password}")
+    
+    # Print current database count
+    count_db_files()
+
+def get_db():
+    """Connect to the IP-specific database"""
+    db_path = get_user_db_path()
+    
+    # Initialize the database if it doesn't exist
+    if not os.path.exists(db_path):
+        init_user_db(db_path, get_real_ip())
+    
+    db = sqlite3.connect(db_path)
+    db.row_factory = sqlite3.Row
+    return db
+
+@app.before_request
+def before_request():
+    """Ensure user's IP-specific database exists before each request"""
+    if request.endpoint != 'static':  # Skip for static files
+        real_ip = get_real_ip()
+        db_path = get_user_db_path(real_ip)
+        if not os.path.exists(db_path):
+            init_user_db(db_path, real_ip)
+        elif 'username' in session and session.get('is_admin') and real_ip in ip_admin_passwords:
+            # Update admin password in session if it exists for this IP
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT password FROM users WHERE username='admin'")
+            stored_password = c.fetchone()[0]
+            ip_admin_passwords[real_ip] = stored_password
+            conn.close()
+
+# Remove default database initialization
+if os.path.exists(os.path.join('instance', 'users_default.db')):
+    os.remove(os.path.join('instance', 'users_default.db'))
+
+# Print initial database count
+print("\nInitial database count:")
+count_db_files()
 
 # Flag definitions with challenge display names
 CHALLENGE_NAMES = {
@@ -36,97 +206,9 @@ FLAGS = {
     'idor': 'CYSM{n0t3-Sn1ff3r}',
     'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}',
     'osint': 'CYSM{Th15-4cc0unt-d035nt-3X1St}',
-    'broken_access': 'CYSM{Br0k3_my_4cc355\C0ntr0l}',
-    'broken_auth': 'CYSM{Br0k3N=P45S_R353t}'  # Keep flag but remove from visible challenges
+    'broken_access': 'CYSM{Br0k3_my_4cc355_C0ntr0l}',
+    'broken_auth': 'CYSM{Br0k3N=P45S_R353t}'
 }
-
-def init_db():
-    try:
-
-        if os.path.exists(DATABASE):
-            try:
-                os.remove(DATABASE)
-            except:
-                pass
-
-        conn = sqlite3.connect(DATABASE)
-        c = conn.cursor()
-        
-        # Create users table
-        c.execute('''CREATE TABLE IF NOT EXISTS users
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     username TEXT NOT NULL,
-                     password TEXT NOT NULL,
-                     is_admin BOOLEAN DEFAULT 0)''')
-        
-        # Create notes table
-        c.execute('''CREATE TABLE IF NOT EXISTS notes
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     username TEXT NOT NULL,
-                     content TEXT NOT NULL,
-                     is_deletable BOOLEAN DEFAULT 1)''')
-        
-        # Create solved_challenges table
-        c.execute('''CREATE TABLE IF NOT EXISTS solved_challenges
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     username TEXT NOT NULL,
-                     challenge_name TEXT NOT NULL,
-                     solved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        
-        # Insert default admin user with weak credentials
-        c.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-                ('admin', 'Z0J5jHJm!9B9s#', True))
-        
-        # Insert a regular test user
-        c.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-                ('user', 'password123', False))
-        
-        c.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-                ('Unknown', 'Th3w3eknd15th3be35T', False))
-        
-        c.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-                ('cyscom', 'bifb3iub98#$dfs', False))
-
-        # Add new user 'om'
-        c.execute("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-                ('om', '210805', False))
-
-        image_note = '<div style="text-align: center;"><h3>My Darkest Hours</h3><img src="/userdata/88382n2nbd92.png" alt="So pour out the gasoline" style="max-width: 100%; height: auto;"><p>Girl, I felt so alone inside of this crowded room</p></div>'
-        c.execute("INSERT INTO notes (username, content, is_deletable) VALUES (?, ?, ?)",
-                ('Unknown', image_note, False))
-
-        audio_note = '''<div style="text-align: center;">
-            <h3>Internal Meeting Recording - Confidential</h3>
-            <audio controls style="width: 100%; max-width: 500px;">
-                <source src="/userdata/internalmeet28-03-2025.wav" type="audio/wav">
-                Your browser does not support the audio element.
-            </audio>
-            <p style="color: black; margin-top: 10px;">No. The file is not corrupted.</p>
-            <p><a href="/userdata/internalmeet28-03-2025.wav" download class="btn btn-primary" style="display: inline-block; padding: 8px 16px; background: #4f46e5; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px;">Download Recording</a></p>
-        </div>'''
-        c.execute("INSERT INTO notes (username, content, is_deletable) VALUES (?, ?, ?)",
-                ('user', audio_note, False))
-        
-        conn.commit()
-        conn.close()
-        print("Database initialized successfully!")
-    except Exception as e:
-        print(f"Error initializing database: {e}")
-        if os.path.exists(DATABASE):
-            try:
-                os.remove(DATABASE)
-            except:
-                pass
-        raise e
-
-def get_db():
-    try:
-        conn = sqlite3.connect(DATABASE)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except Exception as e:
-        print(f"Error connecting to database: {e}")
-        return None
 
 def generate_session_token(username):
     timestamp = str(int(time.time()))
@@ -134,12 +216,18 @@ def generate_session_token(username):
     return token
 
 def mark_challenge_solved(username, challenge_name):
+    """Mark a challenge as solved for the current IP (shared across users except 'om')"""
     try:
+        # Don't store flags for 'om' user
+        if username == 'om':
+            return True
+
         conn = get_db()
         c = conn.cursor()
+        # Check if already solved for this IP (any user)
         result = c.execute(
-            "SELECT id FROM solved_challenges WHERE username=? AND challenge_name=?",
-            (username, challenge_name)
+            "SELECT id FROM solved_challenges WHERE challenge_name=?",
+            (challenge_name,)
         ).fetchone()
         
         if not result:
@@ -156,12 +244,17 @@ def mark_challenge_solved(username, challenge_name):
     return False
 
 def get_solved_challenges(username):
+    """Get all solved challenges for the current IP (shared across users except 'om')"""
     try:
+        # Special handling for 'om' user - only show osint flag
+        if username == 'om':
+            return ['osint']
+
         conn = get_db()
         c = conn.cursor()
+        # Get all solved challenges for this IP regardless of user
         solved = c.execute(
-            "SELECT challenge_name FROM solved_challenges WHERE username=?",
-            (username,)
+            "SELECT DISTINCT challenge_name FROM solved_challenges"
         ).fetchall()
         return [row[0] for row in solved]
     except Exception as e:
@@ -233,8 +326,9 @@ def login():
                     if not normal_result and mark_challenge_solved(username, 'sql_injection'):
                         flash(f"Congratulations! You solved the SQL Injection challenge! Flag: {FLAGS['sql_injection']}")
                 
-                # Only award privilege escalation flag for legitimate admin login
-                if session['is_admin'] and username == 'admin' and password == 'Z0J5jHJm!9B9s#':
+                # Award privilege escalation flag for legitimate admin login
+                real_ip = get_real_ip()
+                if session['is_admin'] and username == 'admin' and password == ip_admin_passwords.get(real_ip):
                     if mark_challenge_solved(username, 'privilege_escalation'):
                         flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
                 
@@ -309,8 +403,9 @@ def dashboard():
     
     db = get_db()
     c = db.cursor()
-    c.execute("SELECT id, content FROM notes WHERE username=?", (session['username'],))
-    notes = [{'id': row[0], 'content': row[1]} for row in c.fetchall()]
+    c.execute("SELECT id, title, content FROM notes WHERE username=?", (session['username'],))
+    notes = [{'id': row[0], 'title': row[1], 'content': row[2]} for row in c.fetchall()]
+    db.close()
     
     is_admin = session.get('is_admin', False)
     return render_template('dashboard.html', username=session['username'], notes=notes, is_admin=is_admin)
@@ -320,19 +415,20 @@ def add_note():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
+    title = request.form.get('title', 'Untitled')  # Get title with default value
     note_content = request.form.get('note', '')
     
-    # Check for XSS attempt
+    # Check for XSS attempt - intentionally vulnerable
     xss_patterns = ['<script', 'onerror=', 'onload=']
     if any(pattern in note_content.lower() for pattern in xss_patterns):
         if mark_challenge_solved(session['username'], 'stored_xss'):
             flash(f"Congratulations! You solved the Stored XSS challenge! Flag: {FLAGS['stored_xss']}")
     
     # Intentionally vulnerable to XSS - no input sanitization
-    conn = get_db()
+    conn = get_db()  # This will get the IP-specific database
     c = conn.cursor()
-    c.execute("INSERT INTO notes (username, content) VALUES (?, ?)",
-              (session['username'], note_content))
+    c.execute("INSERT INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
+              (session['username'], title, note_content, 1))
     conn.commit()
     conn.close()
     
@@ -472,9 +568,9 @@ def view_note(note_id):
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    conn = get_db()
+    conn = get_db()  # This will get the IP-specific database
     c = conn.cursor()
-    note = c.execute("SELECT username, content FROM notes WHERE id=?", (note_id,)).fetchone()
+    note = c.execute("SELECT username, title, content FROM notes WHERE id=?", (note_id,)).fetchone()
     conn.close()
     
     if note:
@@ -494,7 +590,7 @@ def view_note(note_id):
                 </div>
             ''', note=note)
         
-        # Award IDOR flag if accessing another user's note (except Unknown's note)
+        # IDOR vulnerability - intentionally not checking if the note belongs to current user
         if note[0] != session['username']:
             if mark_challenge_solved(session['username'], 'idor'):
                 flash(f"Congratulations! You found the IDOR vulnerability! Flag: {FLAGS['idor']}")
@@ -503,7 +599,8 @@ def view_note(note_id):
             <div style="padding: 20px;">
                 <h3>Note Details</h3>
                 <p><strong>Author:</strong> {{ note[0] }}</p>
-                <div>{{ note[1] | safe }}</div>
+                <p><strong>Title:</strong> {{ note[1] }}</p>
+                <div>{{ note[2] | safe }}</div>
                 <br>
                 <a href="/dashboard" class="btn">Back to Dashboard</a>
             </div>
@@ -576,5 +673,4 @@ def about():
     return render_template('about.html')
 
 if __name__ == '__main__':
-    init_db()  # Initialize database when starting the app
     app.run(debug=True)  # Debug mode enabled intentionally 
