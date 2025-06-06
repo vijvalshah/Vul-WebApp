@@ -161,6 +161,16 @@
                     <td>Create database backup (Requires admin token)</td>
                 </tr>
                 <tr>
+                    <td>/api/v1/verify_backup</td>
+                    <td>POST</td>
+                    <td>Verify backup integrity (ID: <span style="font-family: monospace; color: #0e123456">123</span>)</td>
+                </tr>
+                <tr>
+                    <td>/api/v1/user/preferences</td>
+                    <td>POST</td>
+                    <td>Update user preferences (<a href="javascript:void('__proto__')" style="color: inherit; text-decoration: none;">JSON merge</a>)</td>
+                </tr>
+                <tr>
                     <td>/api/v1/debug</td>
                     <td>GET</td>
                     <td>Debug information (Disabled in production)</td>
@@ -175,6 +185,8 @@
                 <p>🔒 Default admin credentials are in <code>config/secrets.yml</code></p>
                 <p>⚡ Debug mode is enabled on port 31337</p>
                 <p>💡 Session tokens use base64 encoding: username:timestamp</p>
+                <!-- Backup verification uses scientific notation for hashes (e.g., 0e123 == 0e456) -->
+                <!-- User preferences are merged recursively without key sanitization -->
             </div>
             <pre><code># Example configuration
 ADMIN_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
@@ -193,6 +205,8 @@ echo -n "user:timestamp" | base64  # Results in dXNlcjp0aW1lc3RhbXA=</code></pre
                 <li>XSS vulnerability in note system (High priority)</li>
                 <li>Admin panel accessible via token manipulation (High priority)</li>
                 <li>Hidden API endpoints may expose sensitive data (High priority)</li>
+                <li>Scientific notation comparison in backup verification (Low priority)</li>
+                <li>Deep object merging needs security review (Medium priority)</li>
             </ul>
         </div>
 
@@ -206,7 +220,17 @@ curl http://localhost:5000/api/v1/internal/debug
 # Access backup system (requires base64 encoded admin token)
 # Token format: username:timestamp
 # Example: echo -n "admin:1234567890" | base64
-curl http://localhost:5000/api/v1/backup?token=YOUR_BASE64_TOKEN</code></pre>
+curl http://localhost:5000/api/v1/backup?token=YOUR_BASE64_TOKEN
+
+# Test backup verification (hash must match ID)
+curl -X POST http://localhost:5000/api/v1/verify_backup \\
+  -H "Content-Type: application/json" \\
+  -d '{"id": "123", "hash": "HASH_HERE"}'
+
+# Update user preferences
+curl -X POST http://localhost:5000/api/v1/user/preferences \\
+  -H "Content-Type: application/json" \\
+  -d '{"theme": "dark", "notifications": {"enabled": true"}}'</code></pre>
         </div>
 
         <div class="section">
@@ -216,12 +240,17 @@ curl http://localhost:5000/api/v1/backup?token=YOUR_BASE64_TOKEN</code></pre>
 ├── backup_2023.sql
 ├── backup_2024.sql
 └── secret_stuff.txt</code></pre>
+            <p style="font-size: 0px; color: transparent">Hint: 0e123456789 == 0e987654321 in float comparison</p>
         </div>
 
         <div style="display: none;">
             <!-- Legacy system access: telnet://localhost:1337 -->
             <!-- SSH key password: Tr0ub4dor&3 -->
             <!-- Flag format: CYSM{...} -->
+            <!-- Backup verification uses PHP-style type juggling with 0e strings -->
+            <!-- User preferences vulnerable to prototype pollution via __proto__ -->
+            <a href="data:text/plain;base64,VHlwZSBKdWdnbGluZzogU2VuZCBpZDoxMjMgYW5kIGhhc2g6MGUxMjM0NTY3ODk=">Hidden hint 1</a>
+            <a href="data:text/plain;base64,UHJvdG90eXBlIFBvbGx1dGlvbjogSW5qZWN0IF9fcHJvdG9fXyBpbnRvIHByZWZlcmVuY2Vz">Hidden hint 2</a>
         </div>
     </div>
 </body>

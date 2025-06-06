@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_from_directory, send_file
 from flask_sqlalchemy import SQLAlchemy
 import sqlite3
 import os
@@ -12,6 +12,7 @@ import string
 from datetime import datetime
 import glob
 import requests
+import json
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # Change this to a secure secret key
@@ -84,7 +85,8 @@ def init_user_db(db_path, ip=None):
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   username TEXT UNIQUE NOT NULL,
                   password TEXT NOT NULL,
-                  is_admin INTEGER DEFAULT 0)''')
+                  is_admin INTEGER DEFAULT 0,
+                  preferences TEXT DEFAULT '{}')''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS notes
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,26 +190,38 @@ CHALLENGE_NAMES = {
     'sql_injection': 'SQL Injection',
     'privilege_escalation': 'Privilege Escalation as Real Admin',
     'stored_xss': 'Stored XSS',
+    'event_xss': 'Event-Based XSS',
     'admin_panel': 'Admin Panel',
     'hidden_info': 'Hidden Info',
     'idor': 'IDOR',
     'ssti': 'SSTI',
     'osint': 'Lost User',
     'broken_access': 'Broken Access Control',
-    'broken_auth': 'Broken Authentication'
+    'broken_auth': 'Broken Authentication',
+    'type_juggling': 'Type Juggling',
+    'proto_pollution': 'Prototype Pollution',
+    'path_traversal': 'Path Traversal',
+    'ssti_advanced': 'Advanced SSTI',
+    'xss_encoded': 'Encoded XSS'
 }
 
 FLAGS = {
     'sql_injection': 'CYSM{sql_iNj3ct-10n}',
     'privilege_escalation': 'CYSM{pr1v1l3g3@escal}',
     'stored_xss': 'CYSM{S70*Xs5}',
+    'event_xss': 'CYSM{3v3nt_b4s3d_Xs5}',
     'admin_panel': 'CYSM{4DMINc0n-s0-1}',
     'hidden_info': 'CYSM{cr4ckedbyWH0?}',
     'idor': 'CYSM{n0t3-Sn1ff3r}',
     'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}',
     'osint': 'CYSM{Th15-4cc0unt-d035nt-3X1St}',
     'broken_access': 'CYSM{Br0k3_my_4cc355_C0ntr0l}',
-    'broken_auth': 'CYSM{Br0k3N=P45S_R353t}'
+    'broken_auth': 'CYSM{Br0k3N=P45S_R353t}',
+    'type_juggling': 'CYSM{Pyth0n_typ3_juggl1ng_1s_fun}',
+    'proto_pollution': 'CYSM{pr0t0_p0llut10n_1n_th3_w1ld}',
+    'path_traversal': 'CYSM{p4th_tr4v3rsal_1s_fun}',
+    'ssti_advanced': 'CYSM{s5t1_4dv4nc3d_1s_fun}',
+    'xss_encoded': 'CYSM{xss_3nc0d3d_1s_fun}'
 }
 
 def generate_session_token(username):
@@ -265,6 +279,17 @@ def get_solved_challenges(username):
 
 @app.route('/')
 def index():
+    # TEMPORARY CODE FOR IP CHANGE DETECTION - REMOVE AFTER TESTING
+    try:
+        current_ip = requests.get('https://api.ipify.org?format=json', timeout=3).json()['ip']
+        if 'real_ip' in session and session['real_ip'] != current_ip:
+            print(f"\n[IP CHANGE DETECTED] Old IP: {session['real_ip']}, New IP: {current_ip}")
+            session.clear()  # Clear session if IP changed
+            print("Session cleared due to IP change")
+    except Exception as e:
+        print(f"\n[IP CHECK ERROR] {str(e)}")
+    # END OF TEMPORARY CODE
+    
     return render_template('login.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -412,25 +437,55 @@ def dashboard():
 
 @app.route('/add_note', methods=['POST'])
 def add_note():
+    """Add a new note with XSS and encoded XSS vulnerabilities"""
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    title = request.form.get('title', 'Untitled')  # Get title with default value
-    note_content = request.form.get('note', '')
+    title = request.form.get('title', 'Untitled')
+    # Check both 'content' and 'note' parameters
+    content = request.form.get('content', '') or request.form.get('note', '')
     
-    # Check for XSS attempt - intentionally vulnerable
+    print(f"Debug: Received note - Title: {title}, Content: {content}")
+    
+    # VULNERABILITY 1: Basic XSS Check
     xss_patterns = ['<script', 'onerror=', 'onload=']
-    if any(pattern in note_content.lower() for pattern in xss_patterns):
+    if any(pattern in content.lower() for pattern in xss_patterns):
         if mark_challenge_solved(session['username'], 'stored_xss'):
             flash(f"Congratulations! You solved the Stored XSS challenge! Flag: {FLAGS['stored_xss']}")
     
-    # Intentionally vulnerable to XSS - no input sanitization
-    conn = get_db()  # This will get the IP-specific database
-    c = conn.cursor()
-    c.execute("INSERT INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
-              (session['username'], title, note_content, 1))
-    conn.commit()
-    conn.close()
+    # VULNERABILITY 2: HTML Entity XSS Bypass
+    encoded_scripts = [
+        '&#x3C;script', '&#60;script',  # Decimal and hex encoding
+        '&lt;script', '%3Cscript',      # HTML entity and URL encoding
+        '\\x3Cscript', '\\u003Cscript'  # Unicode escapes
+    ]
+    
+    if any(encoded in content.lower() for encoded in encoded_scripts):
+        if mark_challenge_solved(session.get('username'), 'xss_encoded'):
+            flash(f"Congratulations! You found the encoded XSS vulnerability! Flag: {FLAGS['xss_encoded']}")
+    
+    # VULNERABILITY 3: Template Injection in title
+    if '{{' in title and '}}' in title:
+        try:
+            # If they try to evaluate something sensitive
+            if 'config' in title.lower() or 'class' in title.lower():
+                if mark_challenge_solved(session.get('username'), 'ssti_advanced'):
+                    flash(f"Congratulations! You found the advanced SSTI vulnerability! Flag: {FLAGS['ssti_advanced']}")
+        except:
+            pass
+    
+    try:
+        # Store the note
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("INSERT INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
+                 (session['username'], title, content, 1))
+        conn.commit()
+        conn.close()
+        print(f"Debug: Note saved successfully")
+    except Exception as e:
+        print(f"Debug: Error saving note: {str(e)}")
+        flash("Error saving note: " + str(e))
     
     return redirect(url_for('dashboard'))
 
@@ -527,12 +582,16 @@ def internal_users_api():
 # Add route to serve files from userdata directory
 @app.route('/userdata/<path:filename>')
 def serve_userdata(filename):
-    # Intentionally vulnerable to path traversal
-    # Players can use ../ to access files outside userdata directory
-    filepath = os.path.join('userdata', filename)
-    if os.path.exists(filepath):
-        return send_from_directory('userdata', filename)
-    return "File not found", 404
+    """Intentionally vulnerable to path traversal"""
+    # INTENTIONALLY VULNERABLE: No path sanitization
+    try:
+        # This is vulnerable to path traversal (e.g., ../../../etc/passwd)
+        if '..' in filename and session.get('logged_in'):
+            if mark_challenge_solved(session.get('username'), 'path_traversal'):
+                flash(f"Congratulations! You found the path traversal vulnerability! Flag: {FLAGS['path_traversal']}")
+        return send_file(os.path.join('userdata', filename))
+    except Exception as e:
+        return str(e), 404
 
 @app.route('/discussions')
 def discussions():
@@ -546,15 +605,36 @@ def search():
         return redirect(url_for('login'))
     
     query = request.form.get('query', '')
+    print(f"Debug: Search query received: {query}")
     
-    # Check for template injection attempts
+    # Check for event-based XSS patterns
+    event_patterns = [
+        'onmouseover=', 'onmouseout=', 'onclick=', 'onload=', 'onerror=',
+        'onmouseenter=', 'onmouseleave=', 'onfocus=', 'onblur=', 'onchange=',
+        'onkeyup=', 'onkeydown=', 'onkeypress=', 'ondblclick=', 'oncontextmenu=',
+        'onmouseup=', 'onmousedown=', 'onsubmit=', 'onreset=', 'onselect=',
+        'onabort=', 'ondrag=', 'ondrop=', 'onpaste=', 'oncopy='
+    ]
+    
+    # Check for both regular and encoded event handlers
+    encoded_events = [event.replace('on', '%6f%6e') for event in event_patterns]  # URL encoded
+    encoded_events.extend([event.replace('on', '&#x6f;&#x6e;') for event in event_patterns])  # HTML hex encoded
+    encoded_events.extend([event.replace('on', '&#111;&#110;') for event in event_patterns])  # HTML decimal encoded
+    
+    all_patterns = event_patterns + encoded_events
+    
+    if any(pattern.lower() in query.lower() for pattern in all_patterns):
+        print("Debug: Event-based XSS pattern detected")
+        if mark_challenge_solved(session['username'], 'event_xss'):
+            flash(f"Congratulations! You found the event-based XSS vulnerability! Flag: {FLAGS['event_xss']}")
+    
+    # Check for template injection attempts (keep existing SSTI check)
     ssti_patterns = ['{{', '{%', 'config', '__class__', '__globals__']
     if any(pattern in query for pattern in ssti_patterns):
         if mark_challenge_solved(session['username'], 'ssti'):
             flash(f"Congratulations! You found the Template Injection vulnerability! Flag: {FLAGS['ssti']}")
     
-    # Intentionally vulnerable to template injection
-    # Players can inject Jinja2 template syntax
+    # Intentionally vulnerable to both XSS and template injection
     template = f'''
         <div class="search-results">
             <h3>Search Results for: {query}</h3>
@@ -671,6 +751,93 @@ def about():
         return redirect(url_for('login'))
     
     return render_template('about.html')
+
+@app.route('/api/v1/verify_backup', methods=['POST'])
+def verify_backup():
+    """Endpoint vulnerable to type juggling"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    try:
+        data = request.get_json()
+        if not data:
+            print("No JSON data received")
+            return jsonify({'status': 'error', 'message': 'No data provided'})
+            
+        backup_hash = data.get('hash', '')
+        backup_id = data.get('id')
+        
+        print(f"Debug: Received data = {data}")
+        print(f"Debug: backup_id = {backup_id} ({type(backup_id)})")
+        print(f"Debug: backup_hash = {backup_hash} ({type(backup_hash)})")
+        
+        # Simple type juggling check
+        if backup_id == 123 and isinstance(backup_hash, str) and backup_hash.startswith('0e'):
+            print("Debug: Basic checks passed")
+            try:
+                # This is the vulnerable part - converting string to float
+                float_hash = float(backup_hash)
+                print(f"Debug: float_hash = {float_hash}")
+                if float_hash == 0.0:
+                    print("Debug: Hash comparison passed")
+                    if mark_challenge_solved(session.get('username'), 'type_juggling'):
+                        return jsonify({
+                            'status': 'success',
+                            'message': f'Congratulations! You found the type juggling vulnerability! Flag: {FLAGS["type_juggling"]}'
+                        })
+            except ValueError as ve:
+                print(f"Debug: Float conversion failed: {ve}")
+                
+    except Exception as e:
+        print(f"Debug: Error in verify_backup: {str(e)}")
+    
+    return jsonify({'status': 'error', 'message': 'Invalid backup verification'})
+
+@app.route('/api/v1/user/preferences', methods=['POST'])
+def update_preferences():
+    """Endpoint vulnerable to prototype pollution"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    try:
+        # Get new preferences from request
+        new_prefs = request.get_json()
+        if not new_prefs:
+            return jsonify({'status': 'error', 'message': 'No preferences provided'})
+            
+        print(f"Debug: Received preferences = {new_prefs}")
+        
+        # Get the current preferences
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get and parse current preferences
+        c.execute("SELECT preferences FROM users WHERE username = ?", (session['username'],))
+        result = c.fetchone()
+        current_prefs = json.loads(result[0]) if result and result[0] else {}
+        
+        print(f"Debug: Current preferences = {current_prefs}")
+        
+        # Check for prototype pollution attempt first
+        if '__proto__' in str(new_prefs) or 'constructor' in str(new_prefs):
+            print("Debug: Prototype pollution detected")
+            if mark_challenge_solved(session['username'], 'proto_pollution'):
+                return jsonify({
+                    'status': 'success',
+                    'message': f'Congratulations! You found the prototype pollution vulnerability! Flag: {FLAGS["proto_pollution"]}'
+                })
+        
+        # Store the new preferences
+        c.execute("UPDATE users SET preferences = ? WHERE username = ?", 
+                 (json.dumps(new_prefs), session['username']))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'status': 'success', 'message': 'Preferences updated successfully'})
+        
+    except Exception as e:
+        print(f"Debug: Error in update_preferences: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
 
 if __name__ == '__main__':
     app.run(debug=True)  # Debug mode enabled intentionally 
