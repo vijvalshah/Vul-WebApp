@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Dashboard - CTF Challenge</title>
+    <title>Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         :root {
@@ -266,6 +266,7 @@
             <h2>📝 Add a Note</h2>
             <!-- Intentionally vulnerable to CSRF - no CSRF token -->
             <form class="note-form" method="POST" action="/add_note">
+                <input type="text" name="title" placeholder="Enter note title..." style="width: 100%; padding: 0.75rem; border: 1px solid rgba(229, 231, 235, 0.5); border-radius: 0.5rem; font-size: 1rem; margin-bottom: 1rem; background: rgba(255, 255, 255, 0.9);">
                 <textarea name="note" placeholder="Enter your note here... (HTML Formatting supported)" required></textarea>
                 <button type="submit" class="btn">Save Note</button>
             </form>

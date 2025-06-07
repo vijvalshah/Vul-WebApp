@@ -101,15 +101,15 @@ def init_user_db(db_path, ip=None):
                   challenge_name TEXT NOT NULL,
                   solved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
 
-    # Generate random passwords for admin and cyscom
+    # Generate random passwords for admin and cabinet
     admin_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
-    cyscom_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    cabinet_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
     
     # Store admin password for this IP
     if ip:
         ip_admin_passwords[ip] = admin_password
 
-    # Insert users with original passwords for user, unknown, and om
+
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
              ('admin', admin_password, 1))
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
@@ -117,12 +117,12 @@ def init_user_db(db_path, ip=None):
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
              ('Unknown', 'Th3w3eknd15th3be35T', 0))
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-             ('cyscom', cyscom_password, 0))
+             ('cabinet', cabinet_password, 0))
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-             ('om', '210805', 0))
+             ('cyscom', '15012022', 0))
 
     # Add the non-deletable notes
-    image_note = '<div style="text-align: center;"><h3>My Darkest Hours</h3><img src="/userdata/88382n2nbd92.png" alt="So pour out the gasoline" style="max-width: 100%; height: auto;"><p>Girl, I felt so alone inside of this crowded room</p></div>'
+    image_note = '<div style="text-align: center;"><h3>My Darkest Hours</h3><img src="/userdata/88382n2nbd92.png" alt="Different girls on the floor, distractin my thoughts of you" style="max-width: 100%; height: auto;"><p>Girl, I felt so alone inside of this crowded room</p></div>'
     c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
              ('Unknown', 'Important Notice', image_note, 0))
 
@@ -137,13 +137,15 @@ def init_user_db(db_path, ip=None):
     </div>'''
     c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
              ('user', 'Internal Meeting Recording', audio_note, 0))
+    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
+             ('cabinet', 'Remember The Date', '<a href="https://cyscomvit.com/">Click Me!</a>', 0))
 
     conn.commit()
     conn.close()
 
     print(f"Database initialized successfully")
     print(f"Admin password for IP {ip}: {admin_password}")
-    print(f"Cyscom password for IP {ip}: {cyscom_password}")
+    print(f"Cyscom password for IP {ip}: {cabinet_password}")
     
     # Print current database count
     count_db_files()
@@ -200,7 +202,6 @@ CHALLENGE_NAMES = {
     'broken_auth': 'Broken Authentication',
     'type_juggling': 'Type Juggling',
     'proto_pollution': 'Prototype Pollution',
-    'path_traversal': 'Path Traversal',
     'ssti_advanced': 'Advanced SSTI',
     'xss_encoded': 'Encoded XSS'
 }
@@ -219,7 +220,6 @@ FLAGS = {
     'broken_auth': 'CYSM{Br0k3N=P45S_R353t}',
     'type_juggling': 'CYSM{Pyth0n_typ3_juggl1ng_1s_fun}',
     'proto_pollution': 'CYSM{pr0t0_p0llut10n_1n_th3_w1ld}',
-    'path_traversal': 'CYSM{p4th_tr4v3rsal_1s_fun}',
     'ssti_advanced': 'CYSM{s5t1_4dv4nc3d_1s_fun}',
     'xss_encoded': 'CYSM{xss_3nc0d3d_1s_fun}'
 }
@@ -230,10 +230,9 @@ def generate_session_token(username):
     return token
 
 def mark_challenge_solved(username, challenge_name):
-    """Mark a challenge as solved for the current IP (shared across users except 'om')"""
     try:
         # Don't store flags for 'om' user
-        if username == 'om':
+        if username == 'cyscom':
             return True
 
         conn = get_db()
@@ -261,7 +260,7 @@ def get_solved_challenges(username):
     """Get all solved challenges for the current IP (shared across users except 'om')"""
     try:
         # Special handling for 'om' user - only show osint flag
-        if username == 'om':
+        if username == 'cyscom':
             return ['osint']
 
         conn = get_db()
@@ -307,10 +306,13 @@ def login():
             
             # Block OR-based SQL injections
             or_patterns = [
-                r"(?i)'\s*or\s*'?1\s*=\s*'?1",  # matches ' OR '1'='1 and variations
-                r"(?i)'\s*or\s*1\s*=\s*1",      # matches ' OR 1=1 and variations
+                r"(?i)'\s*or\s*'?[0-9a-z]+\s*=\s*'?[0-9a-z]+",  # matches ' OR '1'='1', 'or'a'='a', etc
+                r"(?i)'\s*or\s*'.*?'.*?'",      # matches ' OR 'anything'='anything'
                 r"(?i)'\s*or\s*true",           # matches ' OR TRUE and variations
-                r"(?i)'\s*or\s*[0-9]+\s*=\s*[0-9]+", # matches ' OR 2=2 and variations
+                r"(?i)'\s*or\s*1",              # matches ' OR 1 and variations
+                r"(?i)'\s*or\s*[0-9]+",         # matches ' OR 2=2 and variations
+                r"(?i).*?\bor\b.*?=",           # matches any OR with equals
+                r"(?i)'\s*or\s*'",              # matches ' OR ' pattern
             ]
             
             if any(re.search(pattern, username) or re.search(pattern, password) for pattern in or_patterns):
@@ -326,6 +328,22 @@ def login():
                 session['username'] = username
                 session['token'] = generate_session_token(username)
                 session['is_admin'] = bool(result[3])
+                
+                # If someone logs in as cyscom, grant the osint flag to other accounts
+                if username == 'cyscom':
+                    try:
+                        conn = get_db()
+                        c = conn.cursor()
+                        # Insert the osint flag for a generic username to make it available for all
+                        c.execute(
+                            "INSERT OR IGNORE INTO solved_challenges (username, challenge_name) VALUES (?, ?)",
+                            ('user', 'osint')
+                        )
+                        conn.commit()
+                        conn.close()
+                        flash("Lost user flag has been granted to all accounts.")
+                    except Exception as e:
+                        print(f"Error granting osint flag: {e}")
                 
                 # Check for SQL injection - award for any successful injection
                 sql_patterns = [
@@ -371,9 +389,8 @@ def login():
 def flags():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
-    
-    # Special handling for 'om' account
-    if session['username'] == 'om':
+
+    if session['username'] == 'cyscom':
         return render_template_string('''
             <div style="max-width: 800px; margin: 2rem auto; padding: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                 <h2 style="color: #4f46e5; margin-bottom: 1rem;">🏆 Solved Challenges</h2>
@@ -406,7 +423,7 @@ def dashboard():
         return redirect(url_for('login'))
     
     # Special handling for 'om' account
-    if session['username'] == 'om':
+    if session['username'] == 'cyscom':
         return render_template_string('''
             <div style="max-width: 800px; margin: 2rem auto; padding: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                 <h2 style="color: #4f46e5; margin-bottom: 1rem;">Account Status: Scheduled for Deletion</h2>
@@ -454,13 +471,22 @@ def add_note():
             flash(f"Congratulations! You solved the Stored XSS challenge! Flag: {FLAGS['stored_xss']}")
     
     # VULNERABILITY 2: HTML Entity XSS Bypass
-    encoded_scripts = [
-        '&#x3C;script', '&#60;script',  # Decimal and hex encoding
-        '&lt;script', '%3Cscript',      # HTML entity and URL encoding
-        '\\x3Cscript', '\\u003Cscript'  # Unicode escapes
+    encoded_patterns = [
+        # HTML entity encoded variations
+        '&#x3c;', '&#60;', '&lt;',  # < character
+        '&#x3C;', '&#X3C;',         # < character (case variations)
+        '&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;',  # 'script' in hex
+        '&#115;&#99;&#114;&#105;&#112;&#116;',    # 'script' in decimal
+        # URL encoded variations
+        '%3c', '%3C',               # < character
+        '%73%63%72%69%70%74',      # 'script'
+        # JavaScript escape sequences
+        '\\x3c', '\\x3C',          # < character
+        '\\u003c', '\\u003C'       # < character
     ]
     
-    if any(encoded in content.lower() for encoded in encoded_scripts):
+    content_lower = content.lower()
+    if any(pattern.lower() in content_lower for pattern in encoded_patterns):
         if mark_challenge_solved(session.get('username'), 'xss_encoded'):
             flash(f"Congratulations! You found the encoded XSS vulnerability! Flag: {FLAGS['xss_encoded']}")
     
@@ -558,8 +584,7 @@ def api_debug():
 
 @app.route('/api/v1/internal/users', methods=['GET'])
 def internal_users_api():
-    # Intentionally vulnerable - no authentication check
-    # This endpoint is supposed to be internal only but is publicly accessible
+
     try:
         conn = get_db()
         c = conn.cursor()
@@ -579,19 +604,20 @@ def internal_users_api():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
 
-# Add route to serve files from userdata directory
+# Replace the vulnerable serve_userdata route with a secure version
 @app.route('/userdata/<path:filename>')
 def serve_userdata(filename):
-    """Intentionally vulnerable to path traversal"""
-    # INTENTIONALLY VULNERABLE: No path sanitization
+    """Serve files from userdata directory with proper path sanitization"""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    # Sanitize the filename to prevent path traversal
+    safe_filename = os.path.basename(filename)
+    
     try:
-        # This is vulnerable to path traversal (e.g., ../../../etc/passwd)
-        if '..' in filename and session.get('logged_in'):
-            if mark_challenge_solved(session.get('username'), 'path_traversal'):
-                flash(f"Congratulations! You found the path traversal vulnerability! Flag: {FLAGS['path_traversal']}")
-        return send_file(os.path.join('userdata', filename))
+        return send_file(os.path.join('userdata', safe_filename))
     except Exception as e:
-        return str(e), 404
+        return "File not found", 404
 
 @app.route('/discussions')
 def discussions():
@@ -696,13 +722,12 @@ def reset_password():
         new_password = data.get('new_password')
         reset_token = data.get('token')
         
-        # Only allow password resets for 'user' and 'cyscom' accounts
-        if username not in ['user', 'cyscom']:
+        # Only allow password resets for 'user' and 'cabinet' accounts
+        if username not in ['user', 'cabinet']:
             return jsonify({'status': 'error', 'message': 'Password reset not available for this account'})
         
-        # Intentionally vulnerable - predictable reset token
-        # Token is just base64(username:DD) where DD is the current date
-        current_date = time.strftime('%d')  # Gets current day of month (01-31)
+        # Rest of the function remains the same
+        current_date = time.strftime('%d')
         expected_token = base64.b64encode(f"{username}:{current_date}".encode()).decode()
         
         if reset_token == expected_token:
@@ -713,13 +738,11 @@ def reset_password():
                          (new_password, username))
                 conn.commit()
                 
-                # Mark challenge as solved for the user whose password was reset
                 c.execute("INSERT INTO solved_challenges (username, challenge_name) VALUES (?, ?)",
                          (username, 'broken_auth'))
                 conn.commit()
                 conn.close()
                 
-                # Return success with flag
                 return jsonify({
                     'status': 'success', 
                     'message': f'Password updated successfully! You found the authentication vulnerability! Flag: {FLAGS["broken_auth"]}'

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Backup System - CTF Challenge</title>
+    <title>Backup System</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         :root {
@@ -93,10 +93,10 @@
             <h1 class="success">✅ Information Backup System</h1>
             <p>Welcome Cabinet Member.</p>
             <pre>Member details are stored in:
-/var/backups/db/
-├── users.db
-├── flags.db
-└── secrets.txt
+/api/v1/verify_backup
+├── application/json
+├── id is 123
+└── Use your cookies
 
 Found flag: {{ flag }}</pre>
         {% else %}
