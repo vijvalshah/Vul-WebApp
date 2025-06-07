@@ -13,6 +13,7 @@ from datetime import datetime
 import glob
 import requests
 import json
+from urllib.parse import unquote
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # Change this to a secure secret key
@@ -138,7 +139,9 @@ def init_user_db(db_path, ip=None):
     c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
              ('user', 'Internal Meeting Recording', audio_note, 0))
     c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
-             ('cabinet', 'Remember The Date', '<a href="https://cyscomvit.com/">Click Me!</a>', 0))
+             ('cabinet', 'Remember The Date, When it wsas created', '<a href="https://cyscomvit.com/">Click Me!</a>', 0))
+    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
+             ('cabinet', 'Attention!','Our main account will be deleted soon since the password was too easy to guess. I mean who uses a date as password? Please inform all members to create new accounts with stronger passwords', 0))
 
     conn.commit()
     conn.close()
@@ -329,6 +332,13 @@ def login():
                 session['token'] = generate_session_token(username)
                 session['is_admin'] = bool(result[3])
                 
+                # Award privilege escalation flag for legitimate admin login
+                real_ip = get_real_ip()
+                if username == 'admin' and password == ip_admin_passwords.get(real_ip):
+                    print(f"Debug: Admin login detected - IP: {real_ip}, Password: {password}, Stored Password: {ip_admin_passwords.get(real_ip)}")
+                    if mark_challenge_solved(username, 'privilege_escalation'):
+                        flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
+                
                 # If someone logs in as cyscom, grant the osint flag to other accounts
                 if username == 'cyscom':
                     try:
@@ -368,12 +378,6 @@ def login():
                     
                     if not normal_result and mark_challenge_solved(username, 'sql_injection'):
                         flash(f"Congratulations! You solved the SQL Injection challenge! Flag: {FLAGS['sql_injection']}")
-                
-                # Award privilege escalation flag for legitimate admin login
-                real_ip = get_real_ip()
-                if session['is_admin'] and username == 'admin' and password == ip_admin_passwords.get(real_ip):
-                    if mark_challenge_solved(username, 'privilege_escalation'):
-                        flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
                 
                 return redirect(url_for('dashboard'))
             
@@ -471,22 +475,33 @@ def add_note():
             flash(f"Congratulations! You solved the Stored XSS challenge! Flag: {FLAGS['stored_xss']}")
     
     # VULNERABILITY 2: HTML Entity XSS Bypass
-    encoded_patterns = [
-        # HTML entity encoded variations
-        '&#x3c;', '&#60;', '&lt;',  # < character
-        '&#x3C;', '&#X3C;',         # < character (case variations)
-        '&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;',  # 'script' in hex
-        '&#115;&#99;&#114;&#105;&#112;&#116;',    # 'script' in decimal
-        # URL encoded variations
-        '%3c', '%3C',               # < character
-        '%73%63%72%69%70%74',      # 'script'
-        # JavaScript escape sequences
-        '\\x3c', '\\x3C',          # < character
-        '\\u003c', '\\u003C'       # < character
+    # First URL decode the content to handle fully encoded payloads
+    try:
+        decoded_content = unquote(content)
+        print(f"Debug: Decoded content: {decoded_content}")
+    except:
+        decoded_content = content
+    
+    # Check for encoded XSS in both original and decoded content
+    xss_encoded_patterns = [
+        '&#x3c;script', '&#60;script',     # HTML entity encoded
+        '&lt;script',                      # Named entity
+        '%3Cscript',                       # URL encoded
+        '\\x3Cscript',                     # JS hex
+        '\\u003Cscript',                   # JS unicode
+        '%3Cimg%20src%3Dx%20onerror%3D',
+        '&#x3c;img src=x onerror=',
+        '&lt;img src=x onerror='
     ]
     
-    content_lower = content.lower()
-    if any(pattern.lower() in content_lower for pattern in encoded_patterns):
+    content_lower = decoded_content.lower()
+    original_lower = content.lower()
+    
+    if any(pattern.lower() in content_lower for pattern in xss_encoded_patterns) or \
+       any(pattern.lower() in original_lower for pattern in xss_encoded_patterns):
+        print("Debug: Encoded XSS pattern detected")
+        print(f"Debug: Original content: {content}")
+        print(f"Debug: Decoded content: {decoded_content}")
         if mark_challenge_solved(session.get('username'), 'xss_encoded'):
             flash(f"Congratulations! You found the encoded XSS vulnerability! Flag: {FLAGS['xss_encoded']}")
     
@@ -625,13 +640,22 @@ def discussions():
         return redirect(url_for('login'))
     return render_template('discussions.html')
 
-@app.route('/search', methods=['POST'])
+@app.route('/search', methods=['GET', 'POST'])
 def search():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    query = request.form.get('query', '')
+    # Get query from either POST or GET
+    query = request.form.get('query', '') or request.args.get('q', '')
     print(f"Debug: Search query received: {query}")
+    
+    # URL decode the query to handle encoded payloads
+    try:
+        decoded_query = unquote(query)
+    except:
+        decoded_query = query
+    
+    print(f"Debug: Decoded search query: {decoded_query}")
     
     # Check for event-based XSS patterns
     event_patterns = [
@@ -649,25 +673,34 @@ def search():
     
     all_patterns = event_patterns + encoded_events
     
-    if any(pattern.lower() in query.lower() for pattern in all_patterns):
+    # Check both original and decoded query
+    if any(pattern.lower() in query.lower() for pattern in all_patterns) or \
+       any(pattern.lower() in decoded_query.lower() for pattern in all_patterns):
         print("Debug: Event-based XSS pattern detected")
         if mark_challenge_solved(session['username'], 'event_xss'):
             flash(f"Congratulations! You found the event-based XSS vulnerability! Flag: {FLAGS['event_xss']}")
     
     # Check for template injection attempts (keep existing SSTI check)
     ssti_patterns = ['{{', '{%', 'config', '__class__', '__globals__']
-    if any(pattern in query for pattern in ssti_patterns):
+    if any(pattern in decoded_query for pattern in ssti_patterns):
         if mark_challenge_solved(session['username'], 'ssti'):
             flash(f"Congratulations! You found the Template Injection vulnerability! Flag: {FLAGS['ssti']}")
     
     # Intentionally vulnerable to both XSS and template injection
     template = f'''
         <div class="search-results">
-            <h3>Search Results for: {query}</h3>
+            <h3>Search Results for: {decoded_query}</h3>
             <p>No results found.</p>
         </div>
     '''
     return render_template_string(template)
+
+# Add a GET route for search to handle URL parameters
+@app.route('/search.html')
+def search_page():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    return redirect(url_for('search'))
 
 @app.route('/note/<int:note_id>')
 def view_note(note_id):
