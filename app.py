@@ -139,7 +139,7 @@ def init_user_db(db_path, session_id=None):
     c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
              ('user', 'Internal Meeting Recording', audio_note, 0))
     c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
-             ('cabinet', 'Remember The Date, When it wsas created', '<a href="https://cyscomvit.com/">Click Me!</a>', 0))
+             ('cabinet', 'Remember The Date, When it was created', '<a href="https://cyscomvit.com/">Click Me!</a>', 0))
     c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
              ('cabinet', 'Attention!','Our main account will be deleted soon since the password was too easy to guess. I mean who uses a date as password? Please inform all members to create new accounts with stronger passwords', 0))
 
@@ -476,15 +476,36 @@ def add_note():
         if mark_challenge_solved(session['username'], 'stored_xss'):
             flash(f"Congratulations! You solved the Stored XSS challenge! Flag: {FLAGS['stored_xss']}")
     
-    # VULNERABILITY 2: HTML Entity XSS Bypass
-    # First URL decode the content to handle fully encoded payloads
+    # VULNERABILITY 2: Event-based XSS Check
+    event_patterns = [
+        'onmouseover=', 'onmouseout=', 'onclick=', 'onload=', 'onerror=',
+        'onmouseenter=', 'onmouseleave=', 'onfocus=', 'onblur=', 'onchange=',
+        'onkeyup=', 'onkeydown=', 'onkeypress=', 'ondblclick=', 'oncontextmenu=',
+        'onmouseup=', 'onmousedown=', 'onsubmit=', 'onreset=', 'onselect=',
+        'onabort=', 'ondrag=', 'ondrop=', 'onpaste=', 'oncopy='
+    ]
+    
+    # Check for both regular and encoded event handlers
+    encoded_events = [event.replace('on', '%6f%6e') for event in event_patterns]  # URL encoded
+    encoded_events.extend([event.replace('on', '&#x6f;&#x6e;') for event in event_patterns])  # HTML hex encoded
+    encoded_events.extend([event.replace('on', '&#111;&#110;') for event in event_patterns])  # HTML decimal encoded
+    
+    all_patterns = event_patterns + encoded_events
+    
+    # Try to decode content for checking encoded payloads
     try:
         decoded_content = unquote(content)
-        print(f"Debug: Decoded content: {decoded_content}")
     except:
         decoded_content = content
     
-    # Check for encoded XSS in both original and decoded content
+    # Check both original and decoded content for event-based XSS
+    if any(pattern.lower() in content.lower() for pattern in all_patterns) or \
+       any(pattern.lower() in decoded_content.lower() for pattern in all_patterns):
+        print("Debug: Event-based XSS pattern detected in note")
+        if mark_challenge_solved(session['username'], 'event_xss'):
+            flash(f"Congratulations! You found the event-based XSS vulnerability! Flag: {FLAGS['event_xss']}")
+    
+    # VULNERABILITY 3: HTML Entity XSS Bypass
     xss_encoded_patterns = [
         '&#x3c;script', '&#60;script',     # HTML entity encoded
         '&lt;script',                      # Named entity
@@ -502,12 +523,10 @@ def add_note():
     if any(pattern.lower() in content_lower for pattern in xss_encoded_patterns) or \
        any(pattern.lower() in original_lower for pattern in xss_encoded_patterns):
         print("Debug: Encoded XSS pattern detected")
-        print(f"Debug: Original content: {content}")
-        print(f"Debug: Decoded content: {decoded_content}")
         if mark_challenge_solved(session.get('username'), 'xss_encoded'):
             flash(f"Congratulations! You found the encoded XSS vulnerability! Flag: {FLAGS['xss_encoded']}")
     
-    # VULNERABILITY 3: Template Injection in title
+    # VULNERABILITY 4: Template Injection in title
     if '{{' in title and '}}' in title:
         try:
             # If they try to evaluate something sensitive
