@@ -56,26 +56,25 @@ def get_real_ip():
     print(f"Using fallback IP: {ip}")
     return ip
 
-def get_user_db_path(ip=None):
-    """Get database path specific to user's IP address"""
-    if ip is None:
-        if request:
-            ip = get_real_ip()
-        else:
-            ip = 'default'
+def get_user_db_path(session_id=None):
+    """Get database path specific to user's session"""
+    if session_id is None:
+        if 'session_id' not in session:
+            # Generate a new random session ID if none exists
+            session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+        session_id = session['session_id']
     
-    safe_ip = ip.replace('.', '_').replace(':', '_')  # Sanitize IP for filename
-    db_path = os.path.join('instance', f'users_{safe_ip}.db')
-    print(f"\nAccessing database for IP: {ip}")
+    db_path = os.path.join('instance', f'users_{session_id}.db')
+    print(f"\nAccessing database for Session: {session_id}")
     print(f"Database path: {db_path}")
     return db_path
 
-def init_user_db(db_path, ip=None):
-    """Initialize a new database for a specific path"""
-    if ip is None and request:
-        ip = get_real_ip()
+def init_user_db(db_path, session_id=None):
+    """Initialize a new database for a specific session"""
+    if session_id is None and 'session_id' in session:
+        session_id = session['session_id']
     
-    print(f"\nInitializing new database for IP: {ip}")
+    print(f"\nInitializing new database for Session: {session_id}")
     print(f"Creating database at: {db_path}")
     
     conn = sqlite3.connect(db_path)
@@ -106,10 +105,11 @@ def init_user_db(db_path, ip=None):
     admin_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
     cabinet_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
     
-    # Store admin password for this IP
-    if ip:
-        ip_admin_passwords[ip] = admin_password
-
+    # Store admin password for this session
+    if session_id:
+        if 'admin_passwords' not in session:
+            session['admin_passwords'] = {}
+        session['admin_passwords'][session_id] = admin_password
 
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
              ('admin', admin_password, 1))
@@ -147,14 +147,14 @@ def init_user_db(db_path, ip=None):
     conn.close()
 
     print(f"Database initialized successfully")
-    print(f"Admin password for IP {ip}: {admin_password}")
-    print(f"Cyscom password for IP {ip}: {cabinet_password}")
+    print(f"Admin password for Session {session_id}: {admin_password}")
+    print(f"Cyscom password for Session {session_id}: {cabinet_password}")
     
     # Print current database count
     count_db_files()
 
 def get_db():
-    """Connect to the IP-specific database"""
+    """Connect to the session-specific database"""
     db_path = get_user_db_path()
     
     # Initialize the database if it doesn't exist
@@ -167,19 +167,21 @@ def get_db():
 
 @app.before_request
 def before_request():
-    """Ensure user's IP-specific database exists before each request"""
+    """Ensure user's session-specific database exists before each request"""
     if request.endpoint != 'static':  # Skip for static files
-        real_ip = get_real_ip()
-        db_path = get_user_db_path(real_ip)
+        if 'session_id' not in session:
+            session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+        
+        db_path = get_user_db_path(session['session_id'])
         if not os.path.exists(db_path):
-            init_user_db(db_path, real_ip)
-        elif 'username' in session and session.get('is_admin') and real_ip in ip_admin_passwords:
-            # Update admin password in session if it exists for this IP
+            init_user_db(db_path, session['session_id'])
+        elif 'username' in session and session.get('is_admin') and session['session_id'] in session['admin_passwords']:
+            # Update admin password in session if it exists for this session
             conn = get_db()
             c = conn.cursor()
             c.execute("SELECT password FROM users WHERE username='admin'")
             stored_password = c.fetchone()[0]
-            ip_admin_passwords[real_ip] = stored_password
+            session['admin_passwords'][session['session_id']] = stored_password
             conn.close()
 
 # Remove default database initialization
@@ -240,7 +242,7 @@ def mark_challenge_solved(username, challenge_name):
 
         conn = get_db()
         c = conn.cursor()
-        # Check if already solved for this IP (any user)
+        # Check if already solved for this session (any user)
         result = c.execute(
             "SELECT id FROM solved_challenges WHERE challenge_name=?",
             (challenge_name,)
@@ -260,7 +262,7 @@ def mark_challenge_solved(username, challenge_name):
     return False
 
 def get_solved_challenges(username):
-    """Get all solved challenges for the current IP (shared across users except 'om')"""
+    """Get all solved challenges for the current session (shared across users except 'om')"""
     try:
         # Special handling for 'om' user - only show osint flag
         if username == 'cyscom':
@@ -268,7 +270,7 @@ def get_solved_challenges(username):
 
         conn = get_db()
         c = conn.cursor()
-        # Get all solved challenges for this IP regardless of user
+        # Get all solved challenges for this session regardless of user
         solved = c.execute(
             "SELECT DISTINCT challenge_name FROM solved_challenges"
         ).fetchall()
@@ -334,8 +336,8 @@ def login():
                 
                 # Award privilege escalation flag for legitimate admin login
                 real_ip = get_real_ip()
-                if username == 'admin' and password == ip_admin_passwords.get(real_ip):
-                    print(f"Debug: Admin login detected - IP: {real_ip}, Password: {password}, Stored Password: {ip_admin_passwords.get(real_ip)}")
+                if username == 'admin' and password == session['admin_passwords'].get(session['session_id']):
+                    print(f"Debug: Admin login detected - IP: {real_ip}, Password: {password}, Stored Password: {session['admin_passwords'].get(session['session_id'])}")
                     if mark_challenge_solved(username, 'privilege_escalation'):
                         flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
                 
@@ -707,7 +709,7 @@ def view_note(note_id):
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    conn = get_db()  # This will get the IP-specific database
+    conn = get_db()  # This will get the session-specific database
     c = conn.cursor()
     note = c.execute("SELECT username, title, content FROM notes WHERE id=?", (note_id,)).fetchone()
     conn.close()
@@ -895,8 +897,37 @@ def update_preferences():
         print(f"Debug: Error in update_preferences: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)})
 
+# Add cleanup for old session databases
+def cleanup_old_databases():
+    """Clean up databases older than 1 hour"""
+    current_time = time.time()
+    for db_file in glob.glob(os.path.join('instance', 'users_*.db')):
+        if os.path.exists(db_file):
+            file_age = current_time - os.path.getmtime(db_file)
+            if file_age > 3600:  # 1 hour in seconds
+                try:
+                    os.remove(db_file)
+                    print(f"Cleaned up old database: {db_file}")
+                except:
+                    pass
+
+# Add periodic cleanup to the application
+def init_cleanup_scheduler():
+    """Initialize the cleanup scheduler"""
+    import threading
+    def cleanup_task():
+        while True:
+            cleanup_old_databases()
+            time.sleep(3600)  # Run every hour
+    
+    cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
+    cleanup_thread.start()
+
 if __name__ == '__main__':
+    # Initialize cleanup scheduler
+    init_cleanup_scheduler()
+    
     # Get port from environment variable or default to 10000
     port = int(os.environ.get('PORT', 10000))
     # Bind to 0.0.0.0 to make it accessible from outside the container
-    app.run(host='0.0.0.0', port=port)  # Debug mode disabled for production 
+    app.run(host='0.0.0.0', port=port) 
