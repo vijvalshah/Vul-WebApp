@@ -896,4 +896,7 @@ def update_preferences():
         return jsonify({'status': 'error', 'message': str(e)})
 
 if __name__ == '__main__':
-    app.run(debug=True)  # Debug mode enabled intentionally 
+    # Get port from environment variable or default to 10000
+    port = int(os.environ.get('PORT', 10000))
+    # Bind to 0.0.0.0 to make it accessible from outside the container
+    app.run(host='0.0.0.0', port=port)  # Debug mode disabled for production 
