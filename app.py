@@ -390,25 +390,44 @@ def login():
             if any(re.search(pattern, username) or re.search(pattern, password) for pattern in or_patterns):
                 return render_template('login.html', error='Nice try! OR-based injections are blocked. Try another technique!')
             
+            # Check for SQL injection patterns
+            sql_patterns = [
+                r"(?i)--",                   # SQL comment
+                r"(?i)#",                    # SQL comment
+                r"(?i)/\*",                  # SQL comment block
+                r"(?i)union",                # UNION attack
+                r"(?i)'\s*;",                # SQL query stacking
+                r"(?i)'\s*$"                 # Single quote at end
+            ]
+            
+            # Check if this is a SQL injection attempt
+            is_injection = any(re.search(pattern, username) or re.search(pattern, password) for pattern in sql_patterns)
+            
             # Intentionally vulnerable to SQL injection (but not OR-based ones)
             query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
             result = c.execute(query).fetchone()
-            conn.close()
-
+            
             if result:
                 session['logged_in'] = True
                 session['username'] = username
                 session['token'] = generate_session_token(username)
                 session['is_admin'] = bool(result[3])
                 
+                # Check for SQL injection success
+                if is_injection:
+                    # Verify it's not a normal login
+                    check_c = conn.cursor()
+                    normal_query = "SELECT * FROM users WHERE username=? AND password=?"
+                    normal_result = check_c.execute(normal_query, (username, password)).fetchone()
+                    
+                    if not normal_result and mark_challenge_solved(username, 'sql_injection'):
+                        flash(f"Congratulations! You solved the SQL Injection challenge! Flag: {FLAGS['sql_injection']}")
+                
                 # Award privilege escalation flag for legitimate admin login
                 if username == 'admin':
                     # Get the current admin password from the database
-                    conn = get_db()
-                    c = conn.cursor()
                     c.execute("SELECT password FROM users WHERE username='admin'")
                     stored_password = c.fetchone()[0]
-                    conn.close()
                     
                     # Store the current admin password in session
                     session['admin_passwords'][session['session_id']] = stored_password
@@ -417,8 +436,22 @@ def login():
                         if mark_challenge_solved(username, 'privilege_escalation'):
                             flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
                 
+                # If someone logs in as cyscom, grant the osint flag to other accounts
+                if username == 'cyscom':
+                    try:
+                        c.execute(
+                            "INSERT OR IGNORE INTO solved_challenges (username, challenge_name) VALUES (?, ?)",
+                            ('user', 'osint')
+                        )
+                        conn.commit()
+                        flash("Lost user flag has been granted to all accounts.")
+                    except Exception as e:
+                        print(f"Error granting osint flag: {e}")
+                
+                conn.close()
                 return redirect(url_for('dashboard'))
             
+            conn.close()
             return render_template('login.html', error='Invalid credentials')
             
         except Exception as e:
