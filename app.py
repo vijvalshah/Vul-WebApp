@@ -28,9 +28,39 @@ MAX_DB_PER_IP = 3  # Maximum databases per IP
 request_counts = defaultdict(lambda: {'count': 0, 'window_start': 0})
 ip_db_counts = defaultdict(int)
 
+def get_real_client_ip():
+    """Get the real client IP address when behind a proxy"""
+    # Try X-Forwarded-For first (used by Render)
+    forwarded_for = request.headers.get('X-Forwarded-For')
+    if forwarded_for:
+        # Get the first IP in the chain (client's real IP)
+        return forwarded_for.split(',')[0].strip()
+    
+    # Fallback to remote_addr
+    return request.remote_addr
+
 def get_rate_limit_key():
     """Get a key for rate limiting (IP address or session ID)"""
-    return request.remote_addr
+    # If we have a session, use that as the key
+    if 'session_id' in session:
+        return f"session_{session['session_id']}"
+    
+    # Otherwise use the real client IP
+    client_ip = get_real_client_ip()
+    return f"ip_{client_ip}"
+
+def can_create_database(key):
+    """Check if a client can create a new database"""
+    # Use session ID if available, otherwise use IP
+    if key.startswith('session_'):
+        # Allow only one database per session
+        session_id = key.split('_')[1]
+        db_path = os.path.join('instance', f'users_{session_id}.db')
+        return not os.path.exists(db_path)
+    else:
+        # For IP-based limits, be more lenient
+        ip = key.split('_')[1]
+        return ip_db_counts[ip] < MAX_DB_PER_IP
 
 def rate_limit():
     """Decorator for rate limiting"""
@@ -60,10 +90,6 @@ def rate_limit():
         return wrapped
     return decorator
 
-def can_create_database(ip):
-    """Check if an IP can create a new database"""
-    return ip_db_counts[ip] < MAX_DB_PER_IP
-
 # Create instance folder if it doesn't exist
 if not os.path.exists('instance'):
     os.makedirs('instance')
@@ -78,29 +104,6 @@ def count_db_files():
     for db_file in db_files:
         print(f"Found database: {db_file}")
     return len(db_files)
-
-def get_real_ip():
-    """Get the real client IP address using only ipify"""
-    # If we already detected the real IP in this session, use it
-    if 'real_ip' in session:
-        return session['real_ip']
-    
-    # Get IP from ipify
-    try:
-        response = requests.get('https://api.ipify.org?format=json', timeout=3)
-        if response.status_code == 200:
-            ip = response.json()['ip']
-            session['real_ip'] = ip
-            print(f"Got real IP {ip} from ipify")
-            return ip
-    except Exception as e:
-        print(f"Failed to get IP from ipify: {str(e)}")
-    
-    # If ipify fails, use remote_addr as fallback
-    ip = request.remote_addr
-    session['real_ip'] = ip
-    print(f"Using fallback IP: {ip}")
-    return ip
 
 def get_user_db_path(session_id=None):
     """Get database path specific to user's session"""
@@ -209,7 +212,7 @@ def get_db():
     
     # Initialize the database if it doesn't exist
     if not os.path.exists(db_path):
-        init_user_db(db_path, get_real_ip())
+        init_user_db(db_path, get_real_client_ip())
     
     db = sqlite3.connect(db_path)
     db.row_factory = sqlite3.Row
@@ -225,9 +228,9 @@ def before_request():
             session['admin_passwords'] = {}
             
         if 'session_id' not in session:
-            ip = request.remote_addr
-            if not can_create_database(ip):
-                return jsonify({'error': 'Maximum database limit reached for this IP'}), 429
+            rate_limit_key = get_rate_limit_key()
+            if not can_create_database(rate_limit_key):
+                return jsonify({'error': 'Maximum database limit reached'}), 429
             
             session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
             session.permanent = True  # Make session permanent
@@ -346,17 +349,15 @@ def get_solved_challenges(username):
 
 @app.route('/')
 def index():
-    # TEMPORARY CODE FOR IP CHANGE DETECTION - REMOVE AFTER TESTING
-    try:
-        current_ip = requests.get('https://api.ipify.org?format=json', timeout=3).json()['ip']
-        if 'real_ip' in session and session['real_ip'] != current_ip:
-            print(f"\n[IP CHANGE DETECTED] Old IP: {session['real_ip']}, New IP: {current_ip}")
-            session.clear()  # Clear session if IP changed
-            print("Session cleared due to IP change")
-    except Exception as e:
-        print(f"\n[IP CHECK ERROR] {str(e)}")
-    # END OF TEMPORARY CODE
+    # Check for significant IP changes that might indicate proxy bypass attempts
+    current_ip = get_real_client_ip()
+    if 'last_ip' in session and session['last_ip'] != current_ip:
+        # If IP changes dramatically (different subnet), clear session
+        if session['last_ip'].split('.')[0:2] != current_ip.split('.')[0:2]:
+            session.clear()
+            print(f"Session cleared due to significant IP change: {session['last_ip']} -> {current_ip}")
     
+    session['last_ip'] = current_ip
     return render_template('login.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1007,13 +1008,16 @@ def cleanup_old_databases():
 def cleanup_rate_limit_data():
     """Clean up old rate limiting data"""
     current_time = time.time()
+    
+    # Clean up request counts
     for key in list(request_counts.keys()):
         if current_time - request_counts[key]['window_start'] >= RATE_LIMIT_WINDOW * 2:
             del request_counts[key]
     
-    # Reset IP database counts periodically
+    # Clean up IP database counts for non-session entries
     for key in list(ip_db_counts.keys()):
-        ip_db_counts[key] = 0
+        if not key.startswith('session_'):
+            ip_db_counts[key] = 0
 
 # Add periodic cleanup to the application
 def init_cleanup_scheduler():
