@@ -109,11 +109,30 @@ def get_user_db_path(session_id=None):
     """Get database path specific to user's session"""
     if session_id is None:
         if 'session_id' not in session:
-            # Generate a new random session ID if none exists
+            # Get the client identifier (IP or existing session)
+            client_ip = get_real_client_ip()
+            
+            # Check if this IP already has a session/database
+            existing_dbs = glob.glob(os.path.join('instance', 'users_*.db'))
+            for db in existing_dbs:
+                db_session = db.split('users_')[1].replace('.db', '')
+                if db_session in session.get('ip_sessions', {}).get(client_ip, []):
+                    session['session_id'] = db_session
+                    return db
+            
+            # If no existing session, create new one
             session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+            
+            # Track this session ID for this IP
+            if 'ip_sessions' not in session:
+                session['ip_sessions'] = {}
+            if client_ip not in session['ip_sessions']:
+                session['ip_sessions'][client_ip] = []
+            session['ip_sessions'][client_ip].append(session['session_id'])
+            
             # Track database creation for this IP
-            ip = request.remote_addr
-            ip_db_counts[ip] += 1
+            ip_db_counts[client_ip] = len(session['ip_sessions'][client_ip])
+            
         session_id = session['session_id']
     
     db_path = os.path.join('instance', f'users_{session_id}.db')
@@ -218,146 +237,107 @@ def get_db():
     db.row_factory = sqlite3.Row
     return db
 
+def should_create_database():
+    """Check if the current request should create a database"""
+    # List of endpoints that require database interaction
+    db_required_endpoints = {
+        'login', 'dashboard', 'add_note', 'flags', 'admin_panel', 
+        'view_note', 'search', 'verify_backup', 'update_preferences'
+    }
+    
+    # List of methods that might need database interaction
+    db_required_methods = {'POST', 'PUT', 'DELETE'}
+    
+    # Always create DB for POST requests to these endpoints
+    if request.method in db_required_methods and request.endpoint in db_required_endpoints:
+        return True
+    
+    # For GET requests, only create DB if user is already logged in
+    if request.method == 'GET' and session.get('logged_in'):
+        return True
+    
+    # For specific endpoints that need DB even without login
+    if request.endpoint in {'login', 'reset_password'}:
+        return True
+    
+    return False
+
+@app.before_request
+def enforce_session_persistence():
+    """Enforce session persistence and limit database creation"""
+    if request.endpoint != 'static' and should_create_database():
+        client_ip = get_real_client_ip()
+        
+        # Initialize session tracking
+        if 'ip_sessions' not in session:
+            session['ip_sessions'] = {}
+            
+        # Check if this IP has too many databases
+        existing_sessions = session['ip_sessions'].get(client_ip, [])
+        if len(existing_sessions) >= MAX_DB_PER_IP and 'session_id' not in session:
+            return jsonify({
+                'error': 'Too many sessions from this IP. Please complete or close existing sessions.'
+            }), 429
+        
+        # Clean up old sessions periodically
+        if len(existing_sessions) > 0:
+            valid_sessions = []
+            for sess_id in existing_sessions:
+                db_path = os.path.join('instance', f'users_{sess_id}.db')
+                if os.path.exists(db_path):
+                    valid_sessions.append(sess_id)
+            session['ip_sessions'][client_ip] = valid_sessions
+
 @app.before_request
 @rate_limit()
 def before_request():
     """Ensure user's session-specific database exists before each request"""
-    if request.endpoint != 'static':  # Skip for static files
-        # Initialize admin_passwords if it doesn't exist
-        if 'admin_passwords' not in session:
-            session['admin_passwords'] = {}
-            
-        if 'session_id' not in session:
-            rate_limit_key = get_rate_limit_key()
-            if not can_create_database(rate_limit_key):
-                return jsonify({'error': 'Maximum database limit reached'}), 429
-            
-            session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
-            session.permanent = True  # Make session permanent
+    # Skip database creation for static files and non-database endpoints
+    if request.endpoint == 'static' or not should_create_database():
+        return
         
-        db_path = get_user_db_path(session['session_id'])
-        if not os.path.exists(db_path):
-            init_user_db(db_path, session['session_id'])
-        elif 'username' in session and session.get('is_admin'):
-            # Update admin password in session if user is admin
-            try:
-                conn = get_db()
-                c = conn.cursor()
-                c.execute("SELECT password FROM users WHERE username='admin'")
-                stored_password = c.fetchone()[0]
-                session['admin_passwords'][session['session_id']] = stored_password
-                conn.close()
-            except Exception as e:
-                print(f"Error updating admin password in session: {str(e)}")
-
-# Remove default database initialization
-if os.path.exists(os.path.join('instance', 'users_default.db')):
-    os.remove(os.path.join('instance', 'users_default.db'))
-
-# Print initial database count
-print("\nInitial database count:")
-count_db_files()
-
-# Flag definitions with challenge display names
-CHALLENGE_NAMES = {
-    'sql_injection': 'SQL Injection',
-    'privilege_escalation': 'Privilege Escalation as Real Admin',
-    'stored_xss': 'Stored XSS',
-    'event_xss': 'Event-Based XSS',
-    'admin_panel': 'Admin Panel',
-    'hidden_info': 'Hidden Info',
-    'idor': 'IDOR',
-    'ssti': 'SSTI',
-    'osint': 'Lost User',
-    'broken_access': 'Broken Access Control',
-    'broken_auth': 'Broken Authentication',
-    'type_juggling': 'Type Juggling',
-    'proto_pollution': 'Prototype Pollution',
-    'ssti_advanced': 'Advanced SSTI',
-    'xss_encoded': 'Encoded XSS'
-}
-
-FLAGS = {
-    'sql_injection': 'CYSM{sql_iNj3ct-10n}',
-    'privilege_escalation': 'CYSM{pr1v1l3g3@escal}',
-    'stored_xss': 'CYSM{S70*Xs5}',
-    'event_xss': 'CYSM{3v3nt_b4s3d_Xs5}',
-    'admin_panel': 'CYSM{4DMINc0n-s0-1}',
-    'hidden_info': 'CYSM{cr4ckedbyWH0?}',
-    'idor': 'CYSM{n0t3-Sn1ff3r}',
-    'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}',
-    'osint': 'CYSM{Th15-4cc0unt-d035nt-3X1St}',
-    'broken_access': 'CYSM{Br0k3_my_4cc355_C0ntr0l}',
-    'broken_auth': 'CYSM{Br0k3N=P45S_R353t}',
-    'type_juggling': 'CYSM{Pyth0n_typ3_juggl1ng_1s_fun}',
-    'proto_pollution': 'CYSM{pr0t0_p0llut10n_1n_th3_w1ld}',
-    'ssti_advanced': 'CYSM{s5t1_4dv4nc3d_1s_fun}',
-    'xss_encoded': 'CYSM{xss_3nc0d3d_1s_fun}'
-}
-
-def generate_session_token(username):
-    timestamp = str(int(time.time()))
-    token = base64.b64encode(f"{username}:{timestamp}".encode()).decode()
-    return token
-
-def mark_challenge_solved(username, challenge_name):
-    try:
-        # Don't store flags for 'om' user
-        if username == 'cyscom':
-            return True
-
-        conn = get_db()
-        c = conn.cursor()
-        # Check if already solved for this session (any user)
-        result = c.execute(
-            "SELECT id FROM solved_challenges WHERE challenge_name=?",
-            (challenge_name,)
-        ).fetchone()
+    # First enforce session persistence
+    persistence_result = enforce_session_persistence()
+    if persistence_result is not None:
+        return persistence_result
         
-        if not result:
-            c.execute(
-                "INSERT INTO solved_challenges (username, challenge_name) VALUES (?, ?)",
-                (username, challenge_name)
-            )
-            conn.commit()
-            return True
-    except Exception as e:
-        print(f"Error marking challenge as solved: {e}")
-    finally:
-        conn.close()
-    return False
-
-def get_solved_challenges(username):
-    """Get all solved challenges for the current session (shared across users except 'om')"""
-    try:
-        # Special handling for 'om' user - only show osint flag
-        if username == 'cyscom':
-            return ['osint']
-
-        conn = get_db()
-        c = conn.cursor()
-        # Get all solved challenges for this session regardless of user
-        solved = c.execute(
-            "SELECT DISTINCT challenge_name FROM solved_challenges"
-        ).fetchall()
-        return [row[0] for row in solved]
-    except Exception as e:
-        print(f"Error getting solved challenges: {e}")
-        return []
-    finally:
-        conn.close()
+    # Initialize admin_passwords if it doesn't exist
+    if 'admin_passwords' not in session:
+        session['admin_passwords'] = {}
+        
+    if 'session_id' not in session:
+        rate_limit_key = get_rate_limit_key()
+        if not can_create_database(rate_limit_key):
+            return jsonify({'error': 'Maximum database limit reached'}), 429
+        
+        session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+        session.permanent = True  # Make session permanent
+    
+    db_path = get_user_db_path(session['session_id'])
+    if not os.path.exists(db_path):
+        init_user_db(db_path, session['session_id'])
+    elif 'username' in session and session.get('is_admin'):
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT password FROM users WHERE username='admin'")
+            stored_password = c.fetchone()[0]
+            session['admin_passwords'][session['session_id']] = stored_password
+            conn.close()
+        except Exception as e:
+            print(f"Error updating admin password in session: {str(e)}")
 
 @app.route('/')
 def index():
-    # Check for significant IP changes that might indicate proxy bypass attempts
-    current_ip = get_real_client_ip()
-    if 'last_ip' in session and session['last_ip'] != current_ip:
-        # If IP changes dramatically (different subnet), clear session
-        if session['last_ip'].split('.')[0:2] != current_ip.split('.')[0:2]:
-            session.clear()
-            print(f"Session cleared due to significant IP change: {session['last_ip']} -> {current_ip}")
+    # Only check IP changes if we're creating a database
+    if should_create_database():
+        current_ip = get_real_client_ip()
+        if 'last_ip' in session and session['last_ip'] != current_ip:
+            if session['last_ip'].split('.')[0:2] != current_ip.split('.')[0:2]:
+                session.clear()
+                print(f"Session cleared due to significant IP change: {session['last_ip']} -> {current_ip}")
+        session['last_ip'] = current_ip
     
-    session['last_ip'] = current_ip
     return render_template('login.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -990,18 +970,28 @@ def update_preferences():
         print(f"Debug: Error in update_preferences: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)})
 
-# Add cleanup for old session databases
 def cleanup_old_databases():
-    """Clean up databases older than 1 hour"""
+    """Clean up databases older than 1 hour and their session records"""
     current_time = time.time()
     for db_file in glob.glob(os.path.join('instance', 'users_*.db')):
         if os.path.exists(db_file):
             file_age = current_time - os.path.getmtime(db_file)
             if file_age > 3600:  # 1 hour in seconds
                 try:
+                    # Get session ID from filename
+                    session_id = db_file.split('users_')[1].replace('.db', '')
+                    
+                    # Remove from all IP sessions tracking
+                    if 'ip_sessions' in session:
+                        for ip in session['ip_sessions']:
+                            if session_id in session['ip_sessions'][ip]:
+                                session['ip_sessions'][ip].remove(session_id)
+                    
+                    # Remove the database file
                     os.remove(db_file)
                     print(f"Cleaned up old database: {db_file}")
-                except:
+                except Exception as e:
+                    print(f"Error cleaning up database {db_file}: {str(e)}")
                     pass
 
 # Add rate limiting data cleanup
@@ -1031,6 +1021,103 @@ def init_cleanup_scheduler():
     
     cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
     cleanup_thread.start()
+
+# Remove default database initialization
+if os.path.exists(os.path.join('instance', 'users_default.db')):
+    os.remove(os.path.join('instance', 'users_default.db'))
+
+# Print initial database count
+print("\nInitial database count:")
+count_db_files()
+
+# Flag definitions with challenge display names
+CHALLENGE_NAMES = {
+    'sql_injection': 'SQL Injection',
+    'privilege_escalation': 'Privilege Escalation as Real Admin',
+    'stored_xss': 'Stored XSS',
+    'event_xss': 'Event-Based XSS',
+    'admin_panel': 'Admin Panel',
+    'hidden_info': 'Hidden Info',
+    'idor': 'IDOR',
+    'ssti': 'SSTI',
+    'osint': 'Lost User',
+    'broken_access': 'Broken Access Control',
+    'broken_auth': 'Broken Authentication',
+    'type_juggling': 'Type Juggling',
+    'proto_pollution': 'Prototype Pollution',
+    'ssti_advanced': 'Advanced SSTI',
+    'xss_encoded': 'Encoded XSS'
+}
+
+FLAGS = {
+    'sql_injection': 'CYSM{sql_iNj3ct-10n}',
+    'privilege_escalation': 'CYSM{pr1v1l3g3@escal}',
+    'stored_xss': 'CYSM{S70*Xs5}',
+    'event_xss': 'CYSM{3v3nt_b4s3d_Xs5}',
+    'admin_panel': 'CYSM{4DMINc0n-s0-1}',
+    'hidden_info': 'CYSM{cr4ckedbyWH0?}',
+    'idor': 'CYSM{n0t3-Sn1ff3r}',
+    'ssti': 'CYSM{T3mPl4t3^1nj3cT10n}',
+    'osint': 'CYSM{Th15-4cc0unt-d035nt-3X1St}',
+    'broken_access': 'CYSM{Br0k3_my_4cc355_C0ntr0l}',
+    'broken_auth': 'CYSM{Br0k3N=P45S_R353t}',
+    'type_juggling': 'CYSM{Pyth0n_typ3_juggl1ng_1s_fun}',
+    'proto_pollution': 'CYSM{pr0t0_p0llut10n_1n_th3_w1ld}',
+    'ssti_advanced': 'CYSM{s5t1_4dv4nc3d_1s_fun}',
+    'xss_encoded': 'CYSM{xss_3nc0d3d_1s_fun}'
+}
+
+def generate_session_token(username):
+    timestamp = str(int(time.time()))
+    token = base64.b64encode(f"{username}:{timestamp}".encode()).decode()
+    return token
+
+def mark_challenge_solved(username, challenge_name):
+    try:
+        # Don't store flags for 'om' user
+        if username == 'cyscom':
+            return True
+
+        conn = get_db()
+        c = conn.cursor()
+        # Check if already solved for this session (any user)
+        result = c.execute(
+            "SELECT id FROM solved_challenges WHERE challenge_name=?",
+            (challenge_name,)
+        ).fetchone()
+        
+        if not result:
+            c.execute(
+                "INSERT INTO solved_challenges (username, challenge_name) VALUES (?, ?)",
+                (username, challenge_name)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"Error marking challenge as solved: {e}")
+    finally:
+        conn.close()
+    return False
+
+def get_solved_challenges(username):
+    """Get all solved challenges for the current session (shared across users except 'om')"""
+    try:
+        # Special handling for 'om' user - only show osint flag
+        if username == 'cyscom':
+            return ['osint']
+
+        conn = get_db()
+        c = conn.cursor()
+        # Get all solved challenges for this session regardless of user
+        solved = c.execute(
+            "SELECT DISTINCT challenge_name FROM solved_challenges"
+        ).fetchall()
+        return [row[0] for row in solved]
+    except Exception as e:
+        print(f"Error getting solved challenges: {e}")
+        return []
+    finally:
+        conn.close()
 
 if __name__ == '__main__':
     # Initialize cleanup scheduler
