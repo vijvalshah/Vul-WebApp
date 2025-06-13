@@ -14,9 +14,55 @@ import glob
 import requests
 import json
 from urllib.parse import unquote
+from functools import wraps
+from collections import defaultdict
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # Change this to a secure secret key
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session lifetime
+
+# Rate limiting configuration
+RATE_LIMIT_WINDOW = 60  # 60 seconds
+MAX_REQUESTS_PER_WINDOW = 100  # Maximum requests per window
+MAX_DB_PER_IP = 3  # Maximum databases per IP
+request_counts = defaultdict(lambda: {'count': 0, 'window_start': 0})
+ip_db_counts = defaultdict(int)
+
+def get_rate_limit_key():
+    """Get a key for rate limiting (IP address or session ID)"""
+    return request.remote_addr
+
+def rate_limit():
+    """Decorator for rate limiting"""
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            try:
+                key = get_rate_limit_key()
+                current_time = time.time()
+                
+                # Reset window if needed
+                if current_time - request_counts[key]['window_start'] >= RATE_LIMIT_WINDOW:
+                    request_counts[key] = {'count': 0, 'window_start': current_time}
+                
+                # Increment request count
+                request_counts[key]['count'] += 1
+                
+                # Check if rate limit exceeded
+                if request_counts[key]['count'] > MAX_REQUESTS_PER_WINDOW:
+                    return jsonify({'error': 'Rate limit exceeded'}), 429
+                
+                return f(*args, **kwargs)
+            except Exception as e:
+                print(f"Rate limit error: {str(e)}")
+                # If there's an error in rate limiting, still allow the request
+                return f(*args, **kwargs)
+        return wrapped
+    return decorator
+
+def can_create_database(ip):
+    """Check if an IP can create a new database"""
+    return ip_db_counts[ip] < MAX_DB_PER_IP
 
 # Create instance folder if it doesn't exist
 if not os.path.exists('instance'):
@@ -62,6 +108,9 @@ def get_user_db_path(session_id=None):
         if 'session_id' not in session:
             # Generate a new random session ID if none exists
             session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+            # Track database creation for this IP
+            ip = request.remote_addr
+            ip_db_counts[ip] += 1
         session_id = session['session_id']
     
     db_path = os.path.join('instance', f'users_{session_id}.db')
@@ -105,12 +154,13 @@ def init_user_db(db_path, session_id=None):
     admin_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
     cabinet_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
     
+    # Initialize admin_passwords in session if it doesn't exist
+    if 'admin_passwords' not in session:
+        session['admin_passwords'] = {}
+    
     # Store admin password for this session
-    if session_id:
-        if 'admin_passwords' not in session:
-            session['admin_passwords'] = {}
-        session['admin_passwords'][session_id] = admin_password
-
+    session['admin_passwords'][session_id] = admin_password
+    
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
              ('admin', admin_password, 1))
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
@@ -166,23 +216,36 @@ def get_db():
     return db
 
 @app.before_request
+@rate_limit()
 def before_request():
     """Ensure user's session-specific database exists before each request"""
     if request.endpoint != 'static':  # Skip for static files
+        # Initialize admin_passwords if it doesn't exist
+        if 'admin_passwords' not in session:
+            session['admin_passwords'] = {}
+            
         if 'session_id' not in session:
+            ip = request.remote_addr
+            if not can_create_database(ip):
+                return jsonify({'error': 'Maximum database limit reached for this IP'}), 429
+            
             session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+            session.permanent = True  # Make session permanent
         
         db_path = get_user_db_path(session['session_id'])
         if not os.path.exists(db_path):
             init_user_db(db_path, session['session_id'])
-        elif 'username' in session and session.get('is_admin') and session['session_id'] in session['admin_passwords']:
-            # Update admin password in session if it exists for this session
-            conn = get_db()
-            c = conn.cursor()
-            c.execute("SELECT password FROM users WHERE username='admin'")
-            stored_password = c.fetchone()[0]
-            session['admin_passwords'][session['session_id']] = stored_password
-            conn.close()
+        elif 'username' in session and session.get('is_admin'):
+            # Update admin password in session if user is admin
+            try:
+                conn = get_db()
+                c = conn.cursor()
+                c.execute("SELECT password FROM users WHERE username='admin'")
+                stored_password = c.fetchone()[0]
+                session['admin_passwords'][session['session_id']] = stored_password
+                conn.close()
+            except Exception as e:
+                print(f"Error updating admin password in session: {str(e)}")
 
 # Remove default database initialization
 if os.path.exists(os.path.join('instance', 'users_default.db')):
@@ -303,6 +366,10 @@ def login():
         password = request.form['password']
         
         try:
+            # Initialize admin_passwords if it doesn't exist
+            if 'admin_passwords' not in session:
+                session['admin_passwords'] = {}
+            
             conn = get_db()
             if not conn:
                 return render_template('login.html', error='Database connection error')
@@ -335,51 +402,20 @@ def login():
                 session['is_admin'] = bool(result[3])
                 
                 # Award privilege escalation flag for legitimate admin login
-                real_ip = get_real_ip()
-                if username == 'admin' and password == session['admin_passwords'].get(session['session_id']):
-                    print(f"Debug: Admin login detected - IP: {real_ip}, Password: {password}, Stored Password: {session['admin_passwords'].get(session['session_id'])}")
-                    if mark_challenge_solved(username, 'privilege_escalation'):
-                        flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
-                
-                # If someone logs in as cyscom, grant the osint flag to other accounts
-                if username == 'cyscom':
-                    try:
-                        conn = get_db()
-                        c = conn.cursor()
-                        # Insert the osint flag for a generic username to make it available for all
-                        c.execute(
-                            "INSERT OR IGNORE INTO solved_challenges (username, challenge_name) VALUES (?, ?)",
-                            ('user', 'osint')
-                        )
-                        conn.commit()
-                        conn.close()
-                        flash("Lost user flag has been granted to all accounts.")
-                    except Exception as e:
-                        print(f"Error granting osint flag: {e}")
-                
-                # Check for SQL injection - award for any successful injection
-                sql_patterns = [
-                    r"(?i)--",                   # SQL comment
-                    r"(?i)#",                    # SQL comment
-                    r"(?i)/\*",                  # SQL comment block
-                    r"(?i)union",                # UNION attack
-                    r"(?i)'\s*;",                # SQL query stacking
-                    r"(?i)'\s*$"                 # Single quote at end
-                ]
-                
-                # Check if this is a SQL injection attempt
-                is_injection = any(re.search(pattern, username) or re.search(pattern, password) for pattern in sql_patterns)
-                
-                if is_injection:
-                    # Verify it's not a normal login
-                    check_conn = get_db()
-                    check_c = check_conn.cursor()
-                    normal_query = "SELECT * FROM users WHERE username=? AND password=?"
-                    normal_result = check_c.execute(normal_query, (username, password)).fetchone()
-                    check_conn.close()
+                if username == 'admin':
+                    # Get the current admin password from the database
+                    conn = get_db()
+                    c = conn.cursor()
+                    c.execute("SELECT password FROM users WHERE username='admin'")
+                    stored_password = c.fetchone()[0]
+                    conn.close()
                     
-                    if not normal_result and mark_challenge_solved(username, 'sql_injection'):
-                        flash(f"Congratulations! You solved the SQL Injection challenge! Flag: {FLAGS['sql_injection']}")
+                    # Store the current admin password in session
+                    session['admin_passwords'][session['session_id']] = stored_password
+                    
+                    if password == stored_password:
+                        if mark_challenge_solved(username, 'privilege_escalation'):
+                            flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
                 
                 return redirect(url_for('dashboard'))
             
@@ -553,7 +589,11 @@ def add_note():
 
 @app.route('/logout')
 def logout():
+    """Modified logout to preserve session ID"""
+    session_id = session.get('session_id')  # Store session ID before clearing
     session.clear()
+    session['session_id'] = session_id  # Restore session ID
+    session.permanent = True  # Make session permanent
     return redirect(url_for('login'))
 
 @app.route('/admin')
@@ -930,6 +970,18 @@ def cleanup_old_databases():
                 except:
                     pass
 
+# Add rate limiting data cleanup
+def cleanup_rate_limit_data():
+    """Clean up old rate limiting data"""
+    current_time = time.time()
+    for key in list(request_counts.keys()):
+        if current_time - request_counts[key]['window_start'] >= RATE_LIMIT_WINDOW * 2:
+            del request_counts[key]
+    
+    # Reset IP database counts periodically
+    for key in list(ip_db_counts.keys()):
+        ip_db_counts[key] = 0
+
 # Add periodic cleanup to the application
 def init_cleanup_scheduler():
     """Initialize the cleanup scheduler"""
@@ -937,6 +989,7 @@ def init_cleanup_scheduler():
     def cleanup_task():
         while True:
             cleanup_old_databases()
+            cleanup_rate_limit_data()
             time.sleep(3600)  # Run every hour
     
     cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
