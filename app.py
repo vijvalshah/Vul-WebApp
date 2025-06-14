@@ -22,10 +22,11 @@ app.secret_key = 'your_secret_key_here'  # Change this to a secure secret key
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session lifetime
 
 # Rate limiting configuration
-RATE_LIMIT_WINDOW = 60  # 60 seconds
-MAX_REQUESTS_PER_WINDOW = 100  # Maximum requests per window
+RATE_LIMIT_WINDOW = 45  # 60 seconds
+MAX_REQUESTS_PER_WINDOW = 1000  # More generous limit for general requests
+MAX_DB_REQUESTS_PER_WINDOW = 100  # Stricter limit for database-creating requests
 MAX_DB_PER_IP = 3  # Maximum databases per IP
-request_counts = defaultdict(lambda: {'count': 0, 'window_start': 0})
+request_counts = defaultdict(lambda: {'count': 0, 'db_count': 0, 'window_start': 0})
 ip_db_counts = defaultdict(int)
 
 def get_real_client_ip():
@@ -63,7 +64,7 @@ def can_create_database(key):
         return ip_db_counts[ip] < MAX_DB_PER_IP
 
 def rate_limit():
-    """Decorator for rate limiting"""
+    """Decorator for rate limiting with different limits for DB and non-DB requests"""
     def decorator(f):
         @wraps(f)
         def wrapped(*args, **kwargs):
@@ -73,14 +74,21 @@ def rate_limit():
                 
                 # Reset window if needed
                 if current_time - request_counts[key]['window_start'] >= RATE_LIMIT_WINDOW:
-                    request_counts[key] = {'count': 0, 'window_start': current_time}
+                    request_counts[key] = {'count': 0, 'db_count': 0, 'window_start': current_time}
                 
                 # Increment request count
                 request_counts[key]['count'] += 1
                 
-                # Check if rate limit exceeded
-                if request_counts[key]['count'] > MAX_REQUESTS_PER_WINDOW:
-                    return jsonify({'error': 'Rate limit exceeded'}), 429
+                # For requests that create databases, also track db_count
+                if should_create_database():
+                    request_counts[key]['db_count'] += 1
+                    # Check if database-creating requests exceeded limit
+                    if request_counts[key]['db_count'] > MAX_DB_REQUESTS_PER_WINDOW:
+                        return jsonify({'error': 'Database creation rate limit exceeded. Please try again later.'}), 429
+                
+                # For general requests, use the more generous limit
+                elif request_counts[key]['count'] > MAX_REQUESTS_PER_WINDOW:
+                    return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
                 
                 return f(*args, **kwargs)
             except Exception as e:
