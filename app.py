@@ -26,9 +26,10 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session lifetime
 RATE_LIMIT_WINDOW = 45  # 45 seconds window
 MAX_REQUESTS_PER_WINDOW = 1000  # More generous limit for general requests
 MAX_DB_REQUESTS_PER_WINDOW = 50  # Stricter limit for database-creating requests
+MAX_BOT_REQUESTS_PER_WINDOW = 100  # Very strict limit for automated tools
 MAX_DB_PER_IP = 3  # Maximum databases per IP
 MAX_DB_CREATION_RATE = 10  # Maximum new databases per minute
-request_counts = defaultdict(lambda: {'count': 0, 'db_count': 0, 'window_start': 0, 'db_creation_time': []})
+request_counts = defaultdict(lambda: {'count': 0, 'db_count': 0, 'window_start': 0, 'db_creation_time': [], 'bot_count': 0})
 ip_db_counts = defaultdict(int)
 
 # Bot detection settings
@@ -128,26 +129,44 @@ def rate_limit():
                 
                 # Reset window if needed
                 if current_time - request_counts[key]['window_start'] >= RATE_LIMIT_WINDOW:
-                    request_counts[key] = {'count': 0, 'db_count': 0, 'window_start': current_time}
+                    request_counts[key] = {
+                        'count': 0, 
+                        'db_count': 0, 
+                        'bot_count': 0,
+                        'window_start': current_time,
+                        'db_creation_time': request_counts[key].get('db_creation_time', [])
+                    }
                 
-                # Increment request count
-                request_counts[key]['count'] += 1
-                
-                # For requests that create databases, also track db_count
-                if should_create_database():
-                    request_counts[key]['db_count'] += 1
-                    # Check if database-creating requests exceeded limit
-                    if request_counts[key]['db_count'] > MAX_DB_REQUESTS_PER_WINDOW:
-                        return jsonify({'error': 'Database creation rate limit exceeded. Please try again later.'}), 429
-                
-                # For general requests, use the more generous limit
-                elif request_counts[key]['count'] > MAX_REQUESTS_PER_WINDOW:
-                    return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+                # Check if it's a bot
+                if is_likely_bot():
+                    request_counts[key]['bot_count'] += 1
+                    # Stricter rate limiting for bots
+                    if request_counts[key]['bot_count'] > MAX_BOT_REQUESTS_PER_WINDOW:
+                        return jsonify({
+                            'error': 'Rate limit exceeded for automated tools. Please slow down your requests.'
+                        }), 429
+                else:
+                    # Increment request count for normal users
+                    request_counts[key]['count'] += 1
+                    
+                    # For requests that create databases, also track db_count
+                    if should_create_database():
+                        request_counts[key]['db_count'] += 1
+                        # Check if database-creating requests exceeded limit
+                        if request_counts[key]['db_count'] > MAX_DB_REQUESTS_PER_WINDOW:
+                            return jsonify({
+                                'error': 'Database creation rate limit exceeded. Please try again later.'
+                            }), 429
+                    
+                    # For general requests, use the more generous limit
+                    elif request_counts[key]['count'] > MAX_REQUESTS_PER_WINDOW:
+                        return jsonify({
+                            'error': 'Rate limit exceeded. Please try again later.'
+                        }), 429
                 
                 return f(*args, **kwargs)
             except Exception as e:
                 print(f"Rate limit error: {str(e)}")
-                # If there's an error in rate limiting, still allow the request
                 return f(*args, **kwargs)
         return wrapped
     return decorator
@@ -360,8 +379,22 @@ def should_create_database():
 def enforce_session_persistence():
     """Enforce session persistence and limit database creation"""
     if request.endpoint != 'static' and should_create_database():
-        # For automated tools, no need to enforce session persistence
+        # For automated tools, check rate limit but allow shared database
         if is_likely_bot():
+            key = get_rate_limit_key()
+            current_time = time.time()
+            
+            # Reset window if needed
+            if current_time - request_counts[key]['window_start'] >= RATE_LIMIT_WINDOW:
+                request_counts[key]['bot_count'] = 0
+                request_counts[key]['window_start'] = current_time
+            
+            # Check bot rate limit
+            request_counts[key]['bot_count'] = request_counts[key].get('bot_count', 0) + 1
+            if request_counts[key]['bot_count'] > MAX_BOT_REQUESTS_PER_WINDOW:
+                return jsonify({
+                    'error': 'Rate limit exceeded for automated tools. Please slow down your requests.'
+                }), 429
             return None
             
         client_ip = get_real_client_ip()
@@ -1133,6 +1166,7 @@ def cleanup_rate_limit_data():
                 request_counts[key] = {
                     'count': 0, 
                     'db_count': 0, 
+                    'bot_count': 0,
                     'window_start': current_time,
                     'db_creation_time': creation_times
                 }
