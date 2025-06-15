@@ -44,6 +44,9 @@ LEGITIMATE_SERVICES = {
     'fastly', 'vercel', 'heroku', 'netlify'
 }
 
+# Add shared database for automated tools
+SHARED_BOT_DB = 'instance/shared_automated_tests.db'
+
 def is_likely_bot():
     """Check if the request is likely from an automated tool"""
     # Check user agent
@@ -52,20 +55,19 @@ def is_likely_bot():
     # Allow legitimate services
     if any(service in user_agent for service in LEGITIMATE_SERVICES):
         return False
-        
-    # Block obvious automation tools
-    if not user_agent or 'python' in user_agent or 'go-http' in user_agent:
+    
+    # Check for SQLMap and other testing tools
+    if ('sqlmap' in user_agent or 
+        any(header[0].lower() in SUSPICIOUS_HEADERS for header in request.headers.items()) or
+        not user_agent or 
+        'python' in user_agent or 
+        'go-http' in user_agent):
         return True
-        
-    # Check for suspicious headers
-    for header in request.headers:
-        if header[0].lower() in SUSPICIOUS_HEADERS:
-            return True
-            
+    
     # Check request patterns that indicate automated tools
     if request.args.get('test') or request.args.get('sleep'):
         return True
-        
+    
     # Check for missing cookies only if session exists and not from legitimate service
     if not request.cookies and session.get('session_id'):
         # Additional check for legitimate services
@@ -73,7 +75,7 @@ def is_likely_bot():
         real_ip = request.headers.get('X-Real-IP')
         if not (forwarded_for or real_ip):
             return True
-        
+    
     return False
 
 def get_real_client_ip():
@@ -183,13 +185,17 @@ def enforce_db_creation_rate(client_ip):
     return True
 
 def get_user_db_path(session_id=None):
-    """Get database path specific to user's session"""
+    """Get database path specific to user's session or shared db for automated tools"""
+    # If it's an automated tool, use the shared database
+    if is_likely_bot():
+        # Initialize shared database if it doesn't exist
+        if not os.path.exists(SHARED_BOT_DB):
+            init_user_db(SHARED_BOT_DB, 'shared_automated')
+        return SHARED_BOT_DB
+    
+    # For real users, continue with session-specific database
     if session_id is None:
         if 'session_id' not in session:
-            # Block automated tools from creating databases
-            if is_likely_bot():
-                raise Exception("Automated tools are not allowed to create databases")
-            
             client_ip = get_real_client_ip()
             
             # Check database creation rate
@@ -206,7 +212,6 @@ def get_user_db_path(session_id=None):
             
             # Additional checks for new database creation
             if len(existing_dbs) > 0:
-                # Check time between database creations
                 newest_db_time = max(os.path.getctime(db) for db in existing_dbs)
                 if time.time() - newest_db_time < 2:  # 2 second minimum between creations
                     raise Exception("Creating databases too quickly. Please wait.")
@@ -227,8 +232,6 @@ def get_user_db_path(session_id=None):
         session_id = session['session_id']
     
     db_path = os.path.join('instance', f'users_{session_id}.db')
-    print(f"\nAccessing database for Session: {session_id}")
-    print(f"Database path: {db_path}")
     return db_path
 
 def init_user_db(db_path, session_id=None):
@@ -357,9 +360,9 @@ def should_create_database():
 def enforce_session_persistence():
     """Enforce session persistence and limit database creation"""
     if request.endpoint != 'static' and should_create_database():
-        # Block automated tools
+        # For automated tools, no need to enforce session persistence
         if is_likely_bot():
-            return jsonify({'error': 'Automated tools are not allowed'}), 429
+            return None
             
         client_ip = get_real_client_ip()
         
@@ -1084,13 +1087,13 @@ def update_preferences():
 def cleanup_old_databases():
     """Clean up databases older than 1 hour"""
     current_time = time.time()
+    
+    # Don't clean up the shared bot database
     for db_file in glob.glob(os.path.join('instance', 'users_*.db')):
-        if os.path.exists(db_file):
+        if os.path.exists(db_file) and db_file != SHARED_BOT_DB:
             file_age = current_time - os.path.getmtime(db_file)
-            # Only clean up if older than 1 hour or if clearly from an automated tool
-            if file_age > 3600:
+            if file_age > 3600:  # 1 hour
                 try:
-                    # Get session ID from filename
                     session_id = db_file.split('users_')[1].replace('.db', '')
                     
                     # Remove from all IP sessions tracking
@@ -1099,12 +1102,21 @@ def cleanup_old_databases():
                             if session_id in session['ip_sessions'][ip]:
                                 session['ip_sessions'][ip].remove(session_id)
                     
-                    # Remove the database file
                     os.remove(db_file)
                     print(f"Cleaned up old database: {db_file}")
                 except Exception as e:
                     print(f"Error cleaning up database {db_file}: {str(e)}")
-                    pass
+    
+    # Reset shared bot database periodically
+    if os.path.exists(SHARED_BOT_DB):
+        file_age = current_time - os.path.getmtime(SHARED_BOT_DB)
+        if file_age > 3600:  # Reset every hour
+            try:
+                os.remove(SHARED_BOT_DB)
+                init_user_db(SHARED_BOT_DB, 'shared_automated')
+                print("Reset shared automated testing database")
+            except Exception as e:
+                print(f"Error resetting shared database: {str(e)}")
 
 # Add rate limiting data cleanup
 def cleanup_rate_limit_data():
