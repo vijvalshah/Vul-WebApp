@@ -31,12 +31,44 @@ MAX_DB_CREATION_RATE = 10  # Maximum new databases per minute
 request_counts = defaultdict(lambda: {'count': 0, 'db_count': 0, 'window_start': 0, 'db_creation_time': []})
 ip_db_counts = defaultdict(int)
 
+# Bot detection settings
+SUSPICIOUS_HEADERS = {
+    'sqlmap', 'burp', 'x-scanner', 'x-forwarded-for', 'acunetix', 
+    'nikto', 'nessus', 'arachni', 'w3af', 'nmap'
+}
+
+def is_likely_bot():
+    """Check if the request is likely from an automated tool"""
+    # Check user agent
+    user_agent = request.headers.get('User-Agent', '').lower()
+    if not user_agent or 'python' in user_agent or 'go-http' in user_agent or 'curl' in user_agent:
+        return True
+        
+    # Check for suspicious headers
+    for header in request.headers:
+        if header[0].lower() in SUSPICIOUS_HEADERS:
+            return True
+            
+    # Check request patterns
+    if request.args.get('test') or request.args.get('sleep'):
+        return True
+        
+    # Check if cookies are maintained
+    if not request.cookies and session.get('session_id'):
+        return True
+        
+    return False
+
 def get_real_client_ip():
     """Get the real client IP address when behind a proxy"""
-    # Try X-Forwarded-For first (used by Render)
+    # First try to get from Render's special header
+    render_ip = request.headers.get('X-Real-IP')
+    if render_ip:
+        return render_ip
+        
+    # Then try X-Forwarded-For, but only trust it if it's from Render
     forwarded_for = request.headers.get('X-Forwarded-For')
-    if forwarded_for:
-        # Get the first IP in the chain (client's real IP)
+    if forwarded_for and not is_likely_bot():
         return forwarded_for.split(',')[0].strip()
     
     # Fallback to remote_addr
@@ -136,7 +168,10 @@ def get_user_db_path(session_id=None):
     """Get database path specific to user's session"""
     if session_id is None:
         if 'session_id' not in session:
-            # Get the client identifier (IP or existing session)
+            # Block automated tools from creating databases
+            if is_likely_bot():
+                raise Exception("Automated tools are not allowed to create databases")
+            
             client_ip = get_real_client_ip()
             
             # Check database creation rate
@@ -151,8 +186,15 @@ def get_user_db_path(session_id=None):
                     session['session_id'] = db_session
                     return db
             
-            # If no existing session, create new one
+            # Additional checks for new database creation
+            if len(existing_dbs) > 0:
+                # Check time between database creations
+                newest_db_time = max(os.path.getctime(db) for db in existing_dbs)
+                if time.time() - newest_db_time < 2:  # 2 second minimum between creations
+                    raise Exception("Creating databases too quickly. Please wait.")
+            
             session['session_id'] = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+            session.permanent = True
             
             # Track this session ID for this IP
             if 'ip_sessions' not in session:
@@ -297,6 +339,10 @@ def should_create_database():
 def enforce_session_persistence():
     """Enforce session persistence and limit database creation"""
     if request.endpoint != 'static' and should_create_database():
+        # Block automated tools
+        if is_likely_bot():
+            return jsonify({'error': 'Automated tools are not allowed'}), 429
+            
         client_ip = get_real_client_ip()
         
         # Initialize session tracking
@@ -1023,7 +1069,7 @@ def cleanup_old_databases():
     for db_file in glob.glob(os.path.join('instance', 'users_*.db')):
         if os.path.exists(db_file):
             file_age = current_time - os.path.getmtime(db_file)
-            if file_age > 3600:  # 1 hour in seconds
+            if file_age > 3600 or is_likely_bot():  # Clean up bot databases immediately
                 try:
                     # Get session ID from filename
                     session_id = db_file.split('users_')[1].replace('.db', '')
@@ -1036,7 +1082,7 @@ def cleanup_old_databases():
                     
                     # Remove the database file
                     os.remove(db_file)
-                    print(f"Cleaned up old database: {db_file}")
+                    print(f"Cleaned up database: {db_file}")
                 except Exception as e:
                     print(f"Error cleaning up database {db_file}: {str(e)}")
                     pass
