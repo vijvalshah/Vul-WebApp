@@ -16,17 +16,19 @@ import json
 from urllib.parse import unquote
 from functools import wraps
 from collections import defaultdict
+from werkzeug.utils import safe_join
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # Change this to a secure secret key
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session lifetime
 
 # Rate limiting configuration
-RATE_LIMIT_WINDOW = 45  # 60 seconds
+RATE_LIMIT_WINDOW = 45  # 45 seconds window
 MAX_REQUESTS_PER_WINDOW = 1000  # More generous limit for general requests
-MAX_DB_REQUESTS_PER_WINDOW = 100  # Stricter limit for database-creating requests
+MAX_DB_REQUESTS_PER_WINDOW = 50  # Stricter limit for database-creating requests
 MAX_DB_PER_IP = 3  # Maximum databases per IP
-request_counts = defaultdict(lambda: {'count': 0, 'db_count': 0, 'window_start': 0})
+MAX_DB_CREATION_RATE = 10  # Maximum new databases per minute
+request_counts = defaultdict(lambda: {'count': 0, 'db_count': 0, 'window_start': 0, 'db_creation_time': []})
 ip_db_counts = defaultdict(int)
 
 def get_real_client_ip():
@@ -113,12 +115,33 @@ def count_db_files():
         print(f"Found database: {db_file}")
     return len(db_files)
 
+def enforce_db_creation_rate(client_ip):
+    """Enforce rate limit on database creation"""
+    current_time = time.time()
+    creation_times = request_counts[f"ip_{client_ip}"]['db_creation_time']
+    
+    # Remove timestamps older than 1 minute
+    creation_times = [t for t in creation_times if current_time - t < 60]
+    request_counts[f"ip_{client_ip}"]['db_creation_time'] = creation_times
+    
+    # Check if too many databases were created in the last minute
+    if len(creation_times) >= MAX_DB_CREATION_RATE:
+        return False
+    
+    # Add current timestamp
+    creation_times.append(current_time)
+    return True
+
 def get_user_db_path(session_id=None):
     """Get database path specific to user's session"""
     if session_id is None:
         if 'session_id' not in session:
             # Get the client identifier (IP or existing session)
             client_ip = get_real_client_ip()
+            
+            # Check database creation rate
+            if not enforce_db_creation_rate(client_ip):
+                raise Exception("Database creation rate limit exceeded. Please try again later.")
             
             # Check if this IP already has a session/database
             existing_dbs = glob.glob(os.path.join('instance', 'users_*.db'))
@@ -702,19 +725,35 @@ def internal_users_api():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
 
-# Replace the vulnerable serve_userdata route with a secure version
+# Secure file serving with whitelisted files and proper path validation
+ALLOWED_USERDATA_FILES = {
+    '88382n2nbd92.png',
+    'internalmeet28-03-2025.wav'
+}
+
 @app.route('/userdata/<path:filename>')
 def serve_userdata(filename):
-    """Serve files from userdata directory with proper path sanitization"""
+    """Serve files from userdata directory with strict security"""
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    # Sanitize the filename to prevent path traversal
-    safe_filename = os.path.basename(filename)
+    # Only allow whitelisted files
+    if filename not in ALLOWED_USERDATA_FILES:
+        return "File not found", 404
     
     try:
-        return send_file(os.path.join('userdata', safe_filename))
+        # Use safe_join to prevent path traversal
+        safe_path = safe_join('userdata', filename)
+        if safe_path is None:  # safe_join returns None if path traversal was attempted
+            return "Invalid file path", 400
+            
+        # Additional path validation
+        if not os.path.abspath(safe_path).startswith(os.path.abspath('userdata')):
+            return "Invalid file path", 400
+            
+        return send_file(safe_path)
     except Exception as e:
+        print(f"File serving error: {str(e)}")
         return "File not found", 404
 
 @app.route('/discussions')
@@ -1007,10 +1046,21 @@ def cleanup_rate_limit_data():
     """Clean up old rate limiting data"""
     current_time = time.time()
     
-    # Clean up request counts
+    # Clean up request counts and database creation timestamps
     for key in list(request_counts.keys()):
         if current_time - request_counts[key]['window_start'] >= RATE_LIMIT_WINDOW * 2:
-            del request_counts[key]
+            # Keep db_creation_time but remove old timestamps
+            creation_times = request_counts[key]['db_creation_time']
+            creation_times = [t for t in creation_times if current_time - t < 60]
+            if creation_times:
+                request_counts[key] = {
+                    'count': 0, 
+                    'db_count': 0, 
+                    'window_start': current_time,
+                    'db_creation_time': creation_times
+                }
+            else:
+                del request_counts[key]
     
     # Clean up IP database counts for non-session entries
     for key in list(ip_db_counts.keys()):
