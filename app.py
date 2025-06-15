@@ -33,15 +33,28 @@ ip_db_counts = defaultdict(int)
 
 # Bot detection settings
 SUSPICIOUS_HEADERS = {
-    'sqlmap', 'burp', 'x-scanner', 'x-forwarded-for', 'acunetix', 
+    'sqlmap', 'burp', 'x-scanner', 'acunetix', 
     'nikto', 'nessus', 'arachni', 'w3af', 'nmap'
+}
+
+# Legitimate service user agents (partial matches)
+LEGITIMATE_SERVICES = {
+    'render', 'googlebot', 'bingbot', 'chrome-lighthouse',
+    'google-cloud', 'aws', 'azure', 'cloudflare', 'akamai',
+    'fastly', 'vercel', 'heroku', 'netlify'
 }
 
 def is_likely_bot():
     """Check if the request is likely from an automated tool"""
     # Check user agent
     user_agent = request.headers.get('User-Agent', '').lower()
-    if not user_agent or 'python' in user_agent or 'go-http' in user_agent or 'curl' in user_agent:
+    
+    # Allow legitimate services
+    if any(service in user_agent for service in LEGITIMATE_SERVICES):
+        return False
+        
+    # Block obvious automation tools
+    if not user_agent or 'python' in user_agent or 'go-http' in user_agent:
         return True
         
     # Check for suspicious headers
@@ -49,26 +62,31 @@ def is_likely_bot():
         if header[0].lower() in SUSPICIOUS_HEADERS:
             return True
             
-    # Check request patterns
+    # Check request patterns that indicate automated tools
     if request.args.get('test') or request.args.get('sleep'):
         return True
         
-    # Check if cookies are maintained
+    # Check for missing cookies only if session exists and not from legitimate service
     if not request.cookies and session.get('session_id'):
-        return True
+        # Additional check for legitimate services
+        forwarded_for = request.headers.get('X-Forwarded-For')
+        real_ip = request.headers.get('X-Real-IP')
+        if not (forwarded_for or real_ip):
+            return True
         
     return False
 
 def get_real_client_ip():
     """Get the real client IP address when behind a proxy"""
     # First try to get from Render's special header
-    render_ip = request.headers.get('X-Real-IP')
-    if render_ip:
-        return render_ip
+    real_ip = request.headers.get('X-Real-IP')
+    if real_ip:
+        return real_ip
         
-    # Then try X-Forwarded-For, but only trust it if it's from Render
+    # Then try X-Forwarded-For
     forwarded_for = request.headers.get('X-Forwarded-For')
-    if forwarded_for and not is_likely_bot():
+    if forwarded_for:
+        # Get the first IP in the chain (client's real IP)
         return forwarded_for.split(',')[0].strip()
     
     # Fallback to remote_addr
@@ -1064,12 +1082,13 @@ def update_preferences():
         return jsonify({'status': 'error', 'message': str(e)})
 
 def cleanup_old_databases():
-    """Clean up databases older than 1 hour and their session records"""
+    """Clean up databases older than 1 hour"""
     current_time = time.time()
     for db_file in glob.glob(os.path.join('instance', 'users_*.db')):
         if os.path.exists(db_file):
             file_age = current_time - os.path.getmtime(db_file)
-            if file_age > 3600 or is_likely_bot():  # Clean up bot databases immediately
+            # Only clean up if older than 1 hour or if clearly from an automated tool
+            if file_age > 3600:
                 try:
                     # Get session ID from filename
                     session_id = db_file.split('users_')[1].replace('.db', '')
@@ -1082,7 +1101,7 @@ def cleanup_old_databases():
                     
                     # Remove the database file
                     os.remove(db_file)
-                    print(f"Cleaned up database: {db_file}")
+                    print(f"Cleaned up old database: {db_file}")
                 except Exception as e:
                     print(f"Error cleaning up database {db_file}: {str(e)}")
                     pass
