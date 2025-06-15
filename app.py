@@ -27,10 +27,13 @@ RATE_LIMIT_WINDOW = 45  # 45 seconds window
 MAX_REQUESTS_PER_WINDOW = 1000  # More generous limit for general requests
 MAX_DB_REQUESTS_PER_WINDOW = 50  # Stricter limit for database-creating requests
 MAX_BOT_REQUESTS_PER_WINDOW = 100  # Very strict limit for automated tools
+BLOCK_DURATION = 60  # Block duration in seconds
+REQUEST_BURST_THRESHOLD = 200  # Number of requests in 5 seconds to trigger blocking
 MAX_DB_PER_IP = 3  # Maximum databases per IP
 MAX_DB_CREATION_RATE = 10  # Maximum new databases per minute
-request_counts = defaultdict(lambda: {'count': 0, 'db_count': 0, 'window_start': 0, 'db_creation_time': [], 'bot_count': 0})
+request_counts = defaultdict(lambda: {'count': 0, 'db_count': 0, 'window_start': 0, 'db_creation_time': [], 'bot_count': 0, 'recent_requests': []})
 ip_db_counts = defaultdict(int)
+blocked_ips = {}  # Store blocked IPs with their block timestamp
 
 # Bot detection settings
 SUSPICIOUS_HEADERS = {
@@ -118,12 +121,58 @@ def can_create_database(key):
         ip = key.split('_')[1]
         return ip_db_counts[ip] < MAX_DB_PER_IP
 
+def is_ip_blocked(ip):
+    """Check if an IP is currently blocked"""
+    if ip in blocked_ips:
+        block_time = blocked_ips[ip]
+        if time.time() - block_time >= BLOCK_DURATION:
+            # Unblock if duration has passed
+            del blocked_ips[ip]
+            print(f"[Rate Limit] Unblocked IP: {ip} after {BLOCK_DURATION} seconds")
+            return False
+        return True
+    return False
+
+def check_request_burst(ip):
+    """Check if there are too many requests in a short time window"""
+    current_time = time.time()
+    recent_requests = request_counts[ip]['recent_requests']
+    
+    # Remove requests older than 5 seconds
+    recent_requests = [t for t in recent_requests if current_time - t <= 5]
+    request_counts[ip]['recent_requests'] = recent_requests
+    
+    # Add current request
+    recent_requests.append(current_time)
+    
+    # If too many requests in 5 seconds, block the IP
+    if len(recent_requests) > REQUEST_BURST_THRESHOLD:
+        blocked_ips[ip] = current_time
+        print(f"[Rate Limit] BLOCKED IP: {ip} for {BLOCK_DURATION} seconds due to burst traffic ({len(recent_requests)} requests in 5s)")
+        return True
+    
+    return False
+
 def rate_limit():
     """Decorator for rate limiting with different limits for DB and non-DB requests"""
     def decorator(f):
         @wraps(f)
         def wrapped(*args, **kwargs):
             try:
+                client_ip = get_real_client_ip()
+                
+                # Check if IP is blocked
+                if is_ip_blocked(client_ip):
+                    return jsonify({
+                        'error': f'Too many requests. Please wait {BLOCK_DURATION} seconds before trying again.'
+                    }), 429
+                
+                # Check for request bursts
+                if check_request_burst(client_ip):
+                    return jsonify({
+                        'error': f'Too many requests detected. Your IP has been blocked for {BLOCK_DURATION} seconds.'
+                    }), 429
+                
                 key = get_rate_limit_key()
                 current_time = time.time()
                 
@@ -134,14 +183,20 @@ def rate_limit():
                         'db_count': 0, 
                         'bot_count': 0,
                         'window_start': current_time,
-                        'db_creation_time': request_counts[key].get('db_creation_time', [])
+                        'db_creation_time': request_counts[key].get('db_creation_time', []),
+                        'recent_requests': request_counts[key].get('recent_requests', [])
                     }
                 
                 # Check if it's a bot
                 if is_likely_bot():
                     request_counts[key]['bot_count'] += 1
-                    # Stricter rate limiting for bots
+                    # Log high bot activity
+                    if request_counts[key]['bot_count'] % 50 == 0:
+                        print(f"[Rate Limit] High bot activity from {client_ip}: {request_counts[key]['bot_count']} requests")
+                    
+                    # Only block if exceeding burst threshold
                     if request_counts[key]['bot_count'] > MAX_BOT_REQUESTS_PER_WINDOW:
+                        print(f"[Rate Limit] Bot rate limit exceeded for {client_ip}")
                         return jsonify({
                             'error': 'Rate limit exceeded for automated tools. Please slow down your requests.'
                         }), 429
@@ -154,12 +209,14 @@ def rate_limit():
                         request_counts[key]['db_count'] += 1
                         # Check if database-creating requests exceeded limit
                         if request_counts[key]['db_count'] > MAX_DB_REQUESTS_PER_WINDOW:
+                            print(f"[Rate Limit] Database creation limit exceeded for {client_ip}")
                             return jsonify({
                                 'error': 'Database creation rate limit exceeded. Please try again later.'
                             }), 429
                     
                     # For general requests, use the more generous limit
                     elif request_counts[key]['count'] > MAX_REQUESTS_PER_WINDOW:
+                        print(f"[Rate Limit] General request limit exceeded for {client_ip}")
                         return jsonify({
                             'error': 'Rate limit exceeded. Please try again later.'
                         }), 429
@@ -1168,7 +1225,8 @@ def cleanup_rate_limit_data():
                     'db_count': 0, 
                     'bot_count': 0,
                     'window_start': current_time,
-                    'db_creation_time': creation_times
+                    'db_creation_time': creation_times,
+                    'recent_requests': []
                 }
             else:
                 del request_counts[key]
@@ -1177,6 +1235,11 @@ def cleanup_rate_limit_data():
     for key in list(ip_db_counts.keys()):
         if not key.startswith('session_'):
             ip_db_counts[key] = 0
+            
+    # Clean up expired blocks
+    for ip in list(blocked_ips.keys()):
+        if current_time - blocked_ips[ip] >= BLOCK_DURATION:
+            del blocked_ips[ip]
 
 # Add periodic cleanup to the application
 def init_cleanup_scheduler():
