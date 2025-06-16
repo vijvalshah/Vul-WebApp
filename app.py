@@ -515,14 +515,16 @@ def before_request():
         init_user_db(db_path, session['session_id'])
     elif 'username' in session and session.get('is_admin'):
         try:
-        conn = get_db()
-        c = conn.cursor()
+            conn = get_db()
+            c = conn.cursor()
             c.execute("SELECT password FROM users WHERE username='admin'")
             stored_password = c.fetchone()[0]
             session['admin_passwords'][session['session_id']] = stored_password
-        conn.close()
+            conn.close()
         except Exception as e:
             print(f"Error updating admin password in session: {str(e)}")
+            if 'conn' in locals():
+                conn.close()
 
 @app.route('/')
 def index():
@@ -611,8 +613,8 @@ def login():
                     session['admin_passwords'][session['session_id']] = stored_password
                     
                     if password == stored_password:
-                    if mark_challenge_solved(username, 'privilege_escalation'):
-                        flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
+                        if mark_challenge_solved(username, 'privilege_escalation'):
+                            flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
                 
                 # If someone logs in as cyscom, grant the osint flag to other accounts
                 if username == 'cyscom':
