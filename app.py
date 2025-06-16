@@ -161,13 +161,13 @@ def rate_limit():
             try:
                 client_ip = get_real_client_ip()
                 
-                # Check if IP is blocked
+                # Check if IP is blocked - RETURN EARLY
                 if is_ip_blocked(client_ip):
                     return jsonify({
                         'error': f'Too many requests. Please wait {BLOCK_DURATION} seconds before trying again.'
                     }), 429
                 
-                # Check for request bursts
+                # Check for request bursts - RETURN EARLY
                 if check_request_burst(client_ip):
                     return jsonify({
                         'error': f'Too many requests detected. Your IP has been blocked for {BLOCK_DURATION} seconds.'
@@ -187,18 +187,20 @@ def rate_limit():
                         'recent_requests': request_counts[key].get('recent_requests', [])
                     }
                 
-                # Check if it's a bot
+                # Check if it's a bot - STRICT BLOCKING FOR BOTS
                 if is_likely_bot():
                     request_counts[key]['bot_count'] += 1
                     # Log high bot activity
                     if request_counts[key]['bot_count'] % 50 == 0:
                         print(f"[Rate Limit] High bot activity from {client_ip}: {request_counts[key]['bot_count']} requests")
                     
-                    # Only block if exceeding burst threshold
+                    # Immediately block if exceeding bot request threshold
                     if request_counts[key]['bot_count'] > MAX_BOT_REQUESTS_PER_WINDOW:
-                        print(f"[Rate Limit] Bot rate limit exceeded for {client_ip}")
+                        # Add to blocked IPs
+                        blocked_ips[client_ip] = current_time
+                        print(f"[Rate Limit] Bot rate limit exceeded for {client_ip}. Blocking for {BLOCK_DURATION} seconds.")
                         return jsonify({
-                            'error': 'Rate limit exceeded for automated tools. Please slow down your requests.'
+                            'error': 'Rate limit exceeded for automated tools. Please wait before trying again.'
                         }), 429
                 else:
                     # Increment request count for normal users
@@ -209,6 +211,8 @@ def rate_limit():
                         request_counts[key]['db_count'] += 1
                         # Check if database-creating requests exceeded limit
                         if request_counts[key]['db_count'] > MAX_DB_REQUESTS_PER_WINDOW:
+                            # Add to blocked IPs
+                            blocked_ips[client_ip] = current_time
                             print(f"[Rate Limit] Database creation limit exceeded for {client_ip}")
                             return jsonify({
                                 'error': 'Database creation rate limit exceeded. Please try again later.'
@@ -216,6 +220,8 @@ def rate_limit():
                     
                     # For general requests, use the more generous limit
                     elif request_counts[key]['count'] > MAX_REQUESTS_PER_WINDOW:
+                        # Add to blocked IPs
+                        blocked_ips[client_ip] = current_time
                         print(f"[Rate Limit] General request limit exceeded for {client_ip}")
                         return jsonify({
                             'error': 'Rate limit exceeded. Please try again later.'
@@ -224,7 +230,10 @@ def rate_limit():
                 return f(*args, **kwargs)
             except Exception as e:
                 print(f"Rate limit error: {str(e)}")
-                return f(*args, **kwargs)
+                # Don't fall through to the endpoint on errors
+                return jsonify({
+                    'error': 'Rate limiting error occurred'
+                }), 500
         return wrapped
     return decorator
 
@@ -352,7 +361,7 @@ def init_user_db(db_path, session_id=None):
     
     # Store admin password for this session
     session['admin_passwords'][session_id] = admin_password
-    
+
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
              ('admin', admin_password, 1))
     c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
@@ -506,12 +515,12 @@ def before_request():
         init_user_db(db_path, session['session_id'])
     elif 'username' in session and session.get('is_admin'):
         try:
-            conn = get_db()
-            c = conn.cursor()
+        conn = get_db()
+        c = conn.cursor()
             c.execute("SELECT password FROM users WHERE username='admin'")
             stored_password = c.fetchone()[0]
             session['admin_passwords'][session['session_id']] = stored_password
-            conn.close()
+        conn.close()
         except Exception as e:
             print(f"Error updating admin password in session: {str(e)}")
 
@@ -575,7 +584,7 @@ def login():
             # Intentionally vulnerable to SQL injection (but not OR-based ones)
             query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
             result = c.execute(query).fetchone()
-            
+
             if result:
                 session['logged_in'] = True
                 session['username'] = username
@@ -602,8 +611,8 @@ def login():
                     session['admin_passwords'][session['session_id']] = stored_password
                     
                     if password == stored_password:
-                        if mark_challenge_solved(username, 'privilege_escalation'):
-                            flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
+                    if mark_challenge_solved(username, 'privilege_escalation'):
+                        flash(f"Congratulations! You gained admin access with legitimate credentials! Flag: {FLAGS['privilege_escalation']}")
                 
                 # If someone logs in as cyscom, grant the osint flag to other accounts
                 if username == 'cyscom':
