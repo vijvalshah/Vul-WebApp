@@ -47,3 +47,7 @@ The application will be available at `http://localhost:5000`
 11. **Server-Side Template Injection vulnerability**
 
 12. **Broken Authentication**
+
+13. **Prototype Pollution**
+ 
+14. **Type Juggling**
