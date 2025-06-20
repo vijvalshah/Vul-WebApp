@@ -1,7 +1,8 @@
 Flask
 Flask-SQLAlchemy
-requests
-gunicorn
 Werkzeug
+requests
+SQLAlchemy
+gunicorn
 python-dotenv
 sqlite3-api

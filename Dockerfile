@@ -1,30 +1,45 @@
-# Use Python 3.9 slim image
+# Use Python slim image for smaller size and reduced attack surface
 FROM python:3.9-slim
 
 # Set working directory
 WORKDIR /app
 
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=10000
+
+# Create a non-root user
+RUN useradd -m -r appuser && \
+    mkdir -p /app/instance /app/userdata && \
+    chown -R appuser:appuser /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc \
+    libsqlite3-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
-
-# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy application code
 COPY . .
 
-# Create instance and userdata directories with proper permissions
-RUN mkdir -p instance userdata && \
-    chmod 777 instance && \
-    chmod 777 userdata
+# Create necessary directories and set permissions
+RUN chmod 755 /app && \
+    chmod -R 755 /app/instance && \
+    chmod -R 755 /app/userdata && \
+    chown -R appuser:appuser /app
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PORT=10000
-ENV FLASK_ENV=production
+# Switch to non-root user
+USER appuser
 
-# Expose the port
-EXPOSE ${PORT}
+# Expose port
+EXPOSE 10000
 
-# Run the application with gunicorn
-CMD gunicorn --bind 0.0.0.0:$PORT --workers 4 --threads 2 app:app 
+# Run the application
+CMD ["python", "app.py"] 
