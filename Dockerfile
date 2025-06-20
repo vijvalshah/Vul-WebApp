@@ -29,16 +29,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create necessary directories and set permissions
 RUN chmod 755 /app && \
     chmod -R 755 /app/instance && \
     chmod -R 755 /app/userdata && \
     chown -R appuser:appuser /app
 
-# Switch to non-root user
 USER appuser
 
-# Expose port
+
 EXPOSE 10000
 
 # Run the application
