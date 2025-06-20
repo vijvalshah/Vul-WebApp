@@ -38,7 +38,15 @@ blocked_ips = {}  # Store blocked IPs with their block timestamp
 # Bot detection settings
 SUSPICIOUS_HEADERS = {
     'sqlmap', 'burp', 'x-scanner', 'acunetix', 
-    'nikto', 'nessus', 'arachni', 'w3af', 'nmap'
+    'nikto', 'nessus', 'arachni', 'w3af', 'nmap',
+    'dirbuster', 'wfuzz', 'zap', 'metasploit',
+    'masscan', 'hydra', 'gobuster', 'feroxbuster',
+    'x-wap', 'webinspect', 'qualys', 'x-scan',
+    'nuclei', 'x-forwarded-for', 'x-originally-forwarded-for',
+    'x-remote-addr', 'x-remote-ip', 'x-real-ip',
+    'x-originating-ip', 'cf-connecting-ip', 'true-client-ip',
+    'x-probe', 'x-fuzz', 'x-debug', 'x-test',
+    'x-requested-with', 'x-correlation-id'
 }
 
 # Legitimate service user agents (partial matches)
@@ -65,11 +73,19 @@ def is_likely_bot():
         any(header[0].lower() in SUSPICIOUS_HEADERS for header in request.headers.items()) or
         not user_agent or 
         'python' in user_agent or 
-        'go-http' in user_agent):
+        'go-http' in user_agent or
+        'curl' in user_agent or
+        'wget' in user_agent or
+        'postman' in user_agent or
+        'insomnia' in user_agent):
         return True
     
     # Check request patterns that indicate automated tools
-    if request.args.get('test') or request.args.get('sleep'):
+    if (request.args.get('test') or 
+        request.args.get('sleep') or
+        request.args.get('delay') or
+        request.args.get('timeout') or
+        request.args.get('debug')):
         return True
     
     # Check for missing cookies only if session exists and not from legitimate service
@@ -79,6 +95,10 @@ def is_likely_bot():
         real_ip = request.headers.get('X-Real-IP')
         if not (forwarded_for or real_ip):
             return True
+    
+    # Check for rapid requests or suspicious patterns
+    if request.headers.get('Connection') == 'close' and not request.headers.get('Cookie'):
+        return True
     
     return False
 
@@ -271,7 +291,7 @@ def enforce_db_creation_rate(client_ip):
 
 def get_user_db_path(session_id=None):
     """Get database path specific to user's session or shared db for automated tools"""
-    # If it's an automated tool, use the shared database
+    # If it's an automated tool, ALWAYS use the shared database
     if is_likely_bot():
         # Initialize shared database if it doesn't exist
         if not os.path.exists(SHARED_BOT_DB):
@@ -424,6 +444,10 @@ def should_create_database():
         'view_note', 'search', 'verify_backup', 'update_preferences'
     }
     
+    # Always create database for login attempts
+    if request.endpoint == 'login':
+        return True
+    
     # List of methods that might need database interaction
     db_required_methods = {'POST', 'PUT', 'DELETE'}
     
@@ -549,6 +573,11 @@ def login():
             # Initialize admin_passwords if it doesn't exist
             if 'admin_passwords' not in session:
                 session['admin_passwords'] = {}
+            
+            # Ensure database exists before attempting login
+            db_path = get_user_db_path()
+            if not os.path.exists(db_path):
+                init_user_db(db_path)
             
             conn = get_db()
             if not conn:
