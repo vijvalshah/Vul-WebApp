@@ -431,14 +431,17 @@ def init_user_db(db_path, session_id=None):
     count_db_files()
 
 def get_db():
-    """Connect to the session-specific database"""
+    """Connect to the session-specific database with better concurrency handling"""
     db_path = get_user_db_path()
     
     # Initialize the database if it doesn't exist
     if not os.path.exists(db_path):
         init_user_db(db_path, get_real_client_ip())
     
-    db = sqlite3.connect(db_path)
+    # Set timeout and isolation level for better concurrency
+    db = sqlite3.connect(db_path, timeout=30.0)
+    db.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging for better concurrency
+    db.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
     db.row_factory = sqlite3.Row
     return db
 
@@ -749,89 +752,106 @@ def add_note():
         return redirect(url_for('login'))
     
     title = request.form.get('title', 'Untitled')
-    # Check both 'content' and 'note' parameters
     content = request.form.get('content', '') or request.form.get('note', '')
+    current_session = session.get('session_id')
+    challenges_to_mark = set()  # Store challenges to mark as solved
     
-    print(f"Debug: Received note - Title: {title}, Content: {content}")
+    if not current_session:
+        flash("Error: No valid session found")
+        return redirect(url_for('dashboard'))
     
-    # VULNERABILITY 1: Basic XSS Check
-    xss_patterns = ['<script', 'onerror=', 'onload=']
-    if any(pattern in content.lower() for pattern in xss_patterns):
-        if mark_challenge_solved(session['username'], 'stored_xss'):
-            flash(f"Congratulations! You solved the Stored XSS challenge! Flag: {FLAGS['stored_xss']}")
-    
-    # VULNERABILITY 2: Event-based XSS Check
-    event_patterns = [
-        'onmouseover=', 'onmouseout=', 'onclick=', 'onload=', 'onerror=',
-        'onmouseenter=', 'onmouseleave=', 'onfocus=', 'onblur=', 'onchange=',
-        'onkeyup=', 'onkeydown=', 'onkeypress=', 'ondblclick=', 'oncontextmenu=',
-        'onmouseup=', 'onmousedown=', 'onsubmit=', 'onreset=', 'onselect=',
-        'onabort=', 'ondrag=', 'ondrop=', 'onpaste=', 'oncopy='
-    ]
-    
-    # Check for both regular and encoded event handlers
-    encoded_events = [event.replace('on', '%6f%6e') for event in event_patterns]  # URL encoded
-    encoded_events.extend([event.replace('on', '&#x6f;&#x6e;') for event in event_patterns])  # HTML hex encoded
-    encoded_events.extend([event.replace('on', '&#111;&#110;') for event in event_patterns])  # HTML decimal encoded
-    
-    all_patterns = event_patterns + encoded_events
-    
-    # Try to decode content for checking encoded payloads
     try:
-        decoded_content = unquote(content)
-    except:
-        decoded_content = content
-    
-    # Check both original and decoded content for event-based XSS
-    if any(pattern.lower() in content.lower() for pattern in all_patterns) or \
-       any(pattern.lower() in decoded_content.lower() for pattern in all_patterns):
-        print("Debug: Event-based XSS pattern detected in note")
-        if mark_challenge_solved(session['username'], 'event_xss'):
-            flash(f"Congratulations! You found the event-based XSS vulnerability! Flag: {FLAGS['event_xss']}")
-    
-    # VULNERABILITY 3: HTML Entity XSS Bypass
-    xss_encoded_patterns = [
-        '&#x3c;script', '&#60;script',     # HTML entity encoded
-        '&lt;script',                      # Named entity
-        '%3Cscript',                       # URL encoded
-        '\\x3Cscript',                     # JS hex
-        '\\u003Cscript',                   # JS unicode
-        '%3Cimg%20src%3Dx%20onerror%3D',
-        '&#x3c;img src=x onerror=',
-        '&lt;img src=x onerror='
-    ]
-    
-    content_lower = decoded_content.lower()
-    original_lower = content.lower()
-    
-    if any(pattern.lower() in content_lower for pattern in xss_encoded_patterns) or \
-       any(pattern.lower() in original_lower for pattern in xss_encoded_patterns):
-        print("Debug: Encoded XSS pattern detected")
-        if mark_challenge_solved(session.get('username'), 'xss_encoded'):
-            flash(f"Congratulations! You found the encoded XSS vulnerability! Flag: {FLAGS['xss_encoded']}")
-    
-    # VULNERABILITY 4: Template Injection in title
-    if '{{' in title and '}}' in title:
+        # Decode content once for all checks
         try:
-            # If they try to evaluate something sensitive
-            if 'config' in title.lower() or 'class' in title.lower():
-                if mark_challenge_solved(session.get('username'), 'ssti_advanced'):
-                    flash(f"Congratulations! You found the advanced SSTI vulnerability! Flag: {FLAGS['ssti_advanced']}")
+            decoded_content = unquote(content)
         except:
-            pass
-    
-    try:
-        # Store the note
+            decoded_content = content
+        
+        # VULNERABILITY 1: Basic XSS Check
+        xss_patterns = ['<script', 'onerror=', 'onload=']
+        if any(pattern in content.lower() for pattern in xss_patterns):
+            challenges_to_mark.add('stored_xss')
+        
+        # VULNERABILITY 2: Event-based XSS Check
+        event_patterns = [
+            'onmouseover=', 'onmouseout=', 'onclick=', 'onload=', 'onerror=',
+            'onmouseenter=', 'onmouseleave=', 'onfocus=', 'onblur=', 'onchange=',
+            'onkeyup=', 'onkeydown=', 'onkeypress=', 'ondblclick=', 'oncontextmenu=',
+            'onmouseup=', 'onmousedown=', 'onsubmit=', 'onreset=', 'onselect=',
+            'onabort=', 'ondrag=', 'ondrop=', 'onpaste=', 'oncopy='
+        ]
+        
+        # Check for both regular and encoded event handlers
+        encoded_events = [event.replace('on', '%6f%6e') for event in event_patterns]
+        encoded_events.extend([event.replace('on', '&#x6f;&#x6e;') for event in event_patterns])
+        encoded_events.extend([event.replace('on', '&#111;&#110;') for event in event_patterns])
+        all_patterns = event_patterns + encoded_events
+        
+        if any(pattern.lower() in content.lower() for pattern in all_patterns) or \
+           any(pattern.lower() in decoded_content.lower() for pattern in all_patterns):
+            challenges_to_mark.add('event_xss')
+        
+        # VULNERABILITY 3: HTML Entity XSS Bypass
+        xss_encoded_patterns = [
+            '&#x3c;script', '&#60;script',
+            '&lt;script',
+            '%3Cscript',
+            '\\x3Cscript',
+            '\\u003Cscript',
+            '%3Cimg%20src%3Dx%20onerror%3D',
+            '&#x3c;img src=x onerror=',
+            '&lt;img src=x onerror='
+        ]
+        
+        content_lower = decoded_content.lower()
+        original_lower = content.lower()
+        
+        if any(pattern.lower() in content_lower for pattern in xss_encoded_patterns) or \
+           any(pattern.lower() in original_lower for pattern in xss_encoded_patterns):
+            challenges_to_mark.add('xss_encoded')
+        
+        # VULNERABILITY 4: Template Injection in title
+        if '{{' in title and '}}' in title:
+            if 'config' in title.lower() or 'class' in title.lower():
+                challenges_to_mark.add('ssti_advanced')
+        
+        # Handle all database operations in a single transaction
         conn = get_db()
-        c = conn.cursor()
-        c.execute("INSERT INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
-                 (session['username'], title, content, 1))
-        conn.commit()
-        conn.close()
-        print(f"Debug: Note saved successfully")
+        with conn:  # This ensures transaction and proper closing
+            c = conn.cursor()
+            
+            # Insert the note
+            c.execute("""
+                INSERT INTO notes 
+                (username, title, content, is_deletable, session_id) 
+                VALUES (?, ?, ?, ?, ?)
+            """, (session['username'], title, content, 1, current_session))
+            
+            # Mark all discovered challenges as solved in the same transaction
+            for challenge in challenges_to_mark:
+                c.execute("""
+                    INSERT OR REPLACE INTO solved_challenges 
+                    (username, challenge_name, session_id) 
+                    VALUES (?, ?, ?)
+                """, (session['username'], challenge, current_session))
+            
+            conn.commit()
+        
+        # Flash messages for solved challenges
+        for challenge in challenges_to_mark:
+            flash(f"Congratulations! You solved the {CHALLENGE_NAMES[challenge]} challenge! Flag: {FLAGS[challenge]}")
+        
+        print(f"Debug: Note and challenges saved successfully")
+        
     except Exception as e:
-        print(f"Debug: Error saving note: {str(e)}")
-        flash("Error saving note: " + str(e))
+        print(f"Debug: Error in add_note: {str(e)}")
+        flash(f"Error: {str(e)}")
+    finally:
+        if 'conn' in locals():
+            try:
+                conn.close()
+            except:
+                pass
     
     return redirect(url_for('dashboard'))
 
@@ -1351,93 +1371,125 @@ def generate_session_token(username):
     return token
 
 def get_solved_challenges(username):
-    """Get solved challenges for the specific user only"""
-    try:
-        # Special handling for 'cyscom' user - only show osint flag
-        if username == 'cyscom':
-            return ['osint']
+    """Get solved challenges with better concurrency handling"""
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            # Special handling for 'cyscom' user - only show osint flag
+            if username == 'cyscom':
+                return ['osint']
 
-        conn = get_db()
-        c = conn.cursor()
-        
-        # Get current session_id
-        current_session = session.get('session_id')
-        if not current_session:
-            return []
+            conn = get_db()
+            c = conn.cursor()
+            current_session = session.get('session_id')
             
-        # Only get challenges solved by this specific user in this session
-        solved = c.execute(
-            "SELECT DISTINCT challenge_name FROM solved_challenges WHERE username = ? AND session_id = ?",
-            (username, current_session)
-        ).fetchall()
-        
-        # Special case: if 'osint' is solved by 'user' in this session
-        if username != 'cyscom':
-            osint_solved = c.execute(
-                "SELECT 1 FROM solved_challenges WHERE challenge_name = 'osint' AND username = 'user' AND session_id = ?",
-                (current_session,)
-            ).fetchone()
-            if osint_solved and 'osint' not in [row[0] for row in solved]:
-                solved.append(('osint',))
-        
-        return [row[0] for row in solved]
-    except Exception as e:
-        print(f"Error getting solved challenges: {e}")
-        return []
-    finally:
-        if 'conn' in locals():
+            if not current_session:
+                return []
+            
+            # Use a transaction for consistent reads
+            with conn:
+                # Get user's solved challenges
+                solved = c.execute("""
+                    SELECT DISTINCT challenge_name 
+                    FROM solved_challenges 
+                    WHERE username = ? AND session_id = ?
+                """, (username, current_session)).fetchall()
+                
+                # Check for osint flag
+                if username != 'cyscom':
+                    osint_solved = c.execute("""
+                        SELECT 1 
+                        FROM solved_challenges 
+                        WHERE challenge_name = 'osint' 
+                        AND username = 'user' 
+                        AND session_id = ?
+                    """, (current_session,)).fetchone()
+                    
+                    if osint_solved and 'osint' not in [row[0] for row in solved]:
+                        solved.append(('osint',))
+            
             conn.close()
+            return [row[0] for row in solved]
+            
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                retry_count += 1
+                time.sleep(0.1 * retry_count)
+                continue
+            raise
+        except Exception as e:
+            print(f"Error getting solved challenges: {e}")
+            return []
+        finally:
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    print(f"Failed to get challenges after {max_retries} retries")
+    return []
 
 def mark_challenge_solved(username, challenge_name):
-    """Mark a challenge as solved for a specific user"""
-    try:
-        # Special handling for 'cyscom' user - only allow osint flag
-        if username == 'cyscom':
-            if challenge_name == 'osint':
-                conn = get_db()
-                c = conn.cursor()
-                current_session = session.get('session_id')
-                # Check if already solved in this session
-                result = c.execute(
-                    "SELECT id FROM solved_challenges WHERE challenge_name = 'osint' AND username = 'cyscom' AND session_id = ?",
-                    (current_session,)
-                ).fetchone()
-                
-                if not result:
-                    c.execute(
-                        "INSERT INTO solved_challenges (username, challenge_name, session_id) VALUES ('cyscom', 'osint', ?)",
-                        (current_session,)
-                    )
+    """Mark a challenge as solved with better concurrency handling"""
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            # Special handling for 'cyscom' user - only allow osint flag
+            if username == 'cyscom':
+                if challenge_name == 'osint':
+                    conn = get_db()
+                    c = conn.cursor()
+                    current_session = session.get('session_id')
+                    
+                    # Use INSERT OR REPLACE to handle race conditions
+                    c.execute("""
+                        INSERT OR REPLACE INTO solved_challenges 
+                        (username, challenge_name, session_id) 
+                        VALUES (?, ?, ?)
+                    """, ('cyscom', 'osint', current_session))
                     conn.commit()
-                if 'conn' in locals():
                     conn.close()
-                return True
-            return False  # Any other flag attempts for cyscom return False
+                    return True
+                return False
 
-        conn = get_db()
-        c = conn.cursor()
-        current_session = session.get('session_id')
-        
-        # Check if already solved by this specific user in this session
-        result = c.execute(
-            "SELECT id FROM solved_challenges WHERE challenge_name = ? AND username = ? AND session_id = ?",
-            (challenge_name, username, current_session)
-        ).fetchone()
-        
-        if not result:
-            c.execute(
-                "INSERT INTO solved_challenges (username, challenge_name, session_id) VALUES (?, ?, ?)",
-                (username, challenge_name, current_session)
-            )
+            conn = get_db()
+            c = conn.cursor()
+            current_session = session.get('session_id')
+            
+            # Use a single query with INSERT OR REPLACE
+            c.execute("""
+                INSERT OR REPLACE INTO solved_challenges 
+                (username, challenge_name, session_id) 
+                VALUES (?, ?, ?)
+            """, (username, challenge_name, current_session))
+            
             conn.commit()
-            return True
-        return False
-    except Exception as e:
-        print(f"Error marking challenge as solved: {e}")
-        return False
-    finally:
-        if 'conn' in locals():
             conn.close()
+            return True
+            
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                retry_count += 1
+                time.sleep(0.1 * retry_count)  # Exponential backoff
+                continue
+            raise
+        except Exception as e:
+            print(f"Error marking challenge as solved: {e}")
+            return False
+        finally:
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    print(f"Failed to mark challenge after {max_retries} retries")
+    return False
 
 if __name__ == '__main__':
     # Initialize cleanup scheduler
