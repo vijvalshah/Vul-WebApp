@@ -1344,18 +1344,66 @@ def generate_session_token(username):
     token = base64.b64encode(f"{username}:{timestamp}".encode()).decode()
     return token
 
-def mark_challenge_solved(username, challenge_name):
+def get_solved_challenges(username):
+    """Get solved challenges for the specific user only"""
     try:
-        # Don't store flags for 'om' user
+        # Special handling for 'cyscom' user - only show osint flag
         if username == 'cyscom':
-            return True
+            return ['osint']
 
         conn = get_db()
         c = conn.cursor()
-        # Check if already solved for this session (any user)
+        # Only get challenges solved by this specific user
+        solved = c.execute(
+            "SELECT DISTINCT challenge_name FROM solved_challenges WHERE username = ?",
+            (username,)
+        ).fetchall()
+        
+        # Special case: if 'osint' is solved by 'user', it's available to everyone except 'cyscom'
+        if username != 'cyscom':
+            osint_solved = c.execute(
+                "SELECT 1 FROM solved_challenges WHERE challenge_name = 'osint' AND username = 'user'"
+            ).fetchone()
+            if osint_solved and 'osint' not in [row[0] for row in solved]:
+                solved.append(('osint',))
+        
+        return [row[0] for row in solved]
+    except Exception as e:
+        print(f"Error getting solved challenges: {e}")
+        return []
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+def mark_challenge_solved(username, challenge_name):
+    """Mark a challenge as solved for a specific user"""
+    try:
+        # Special handling for 'cyscom' user - only allow osint flag
+        if username == 'cyscom':
+            if challenge_name == 'osint':
+                conn = get_db()
+                c = conn.cursor()
+                # Check if already solved
+                result = c.execute(
+                    "SELECT id FROM solved_challenges WHERE challenge_name = 'osint' AND username = 'cyscom'"
+                ).fetchone()
+                
+                if not result:
+                    c.execute(
+                        "INSERT INTO solved_challenges (username, challenge_name) VALUES ('cyscom', 'osint')"
+                    )
+                    conn.commit()
+                if 'conn' in locals():
+                    conn.close()
+                return True
+            return False  # Any other flag attempts for cyscom return False
+
+        conn = get_db()
+        c = conn.cursor()
+        # Check if already solved by this specific user
         result = c.execute(
-            "SELECT id FROM solved_challenges WHERE challenge_name=?",
-            (challenge_name,)
+            "SELECT id FROM solved_challenges WHERE challenge_name = ? AND username = ?",
+            (challenge_name, username)
         ).fetchone()
         
         if not result:
@@ -1365,31 +1413,13 @@ def mark_challenge_solved(username, challenge_name):
             )
             conn.commit()
             return True
+        return False
     except Exception as e:
         print(f"Error marking challenge as solved: {e}")
+        return False
     finally:
-        conn.close()
-    return False
-
-def get_solved_challenges(username):
-    """Get all solved challenges for the current session (shared across users except 'om')"""
-    try:
-        # Special handling for 'om' user - only show osint flag
-        if username == 'cyscom':
-            return ['osint']
-
-        conn = get_db()
-        c = conn.cursor()
-        # Get all solved challenges for this session regardless of user
-        solved = c.execute(
-            "SELECT DISTINCT challenge_name FROM solved_challenges"
-        ).fetchall()
-        return [row[0] for row in solved]
-    except Exception as e:
-        print(f"Error getting solved challenges: {e}")
-        return []
-    finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
 if __name__ == '__main__':
     # Initialize cleanup scheduler
