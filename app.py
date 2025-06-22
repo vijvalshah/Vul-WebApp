@@ -350,26 +350,31 @@ def init_user_db(db_path, session_id=None):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
-    # Create tables
+    # Create tables with session_id column for better isolation
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  username TEXT UNIQUE NOT NULL,
+                  username TEXT NOT NULL,
                   password TEXT NOT NULL,
                   is_admin INTEGER DEFAULT 0,
-                  preferences TEXT DEFAULT '{}')''')
+                  preferences TEXT DEFAULT '{}',
+                  session_id TEXT NOT NULL,
+                  UNIQUE(username, session_id))''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS notes
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   username TEXT NOT NULL,
                   title TEXT NOT NULL,
                   content TEXT NOT NULL,
-                  is_deletable INTEGER DEFAULT 1)''')
+                  is_deletable INTEGER DEFAULT 1,
+                  session_id TEXT NOT NULL)''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS solved_challenges
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   username TEXT NOT NULL,
                   challenge_name TEXT NOT NULL,
-                  solved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+                  solved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  session_id TEXT NOT NULL,
+                  UNIQUE(username, challenge_name, session_id))''')
 
     # Generate random passwords for admin and cabinet
     admin_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
@@ -382,21 +387,22 @@ def init_user_db(db_path, session_id=None):
     # Store admin password for this session
     session['admin_passwords'][session_id] = admin_password
 
-    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-             ('admin', admin_password, 1))
-    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-             ('user', 'password123', 0))
-    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-             ('Unknown', 'Th3w3eknd15th3be35T', 0))
-    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-             ('cabinet', cabinet_password, 0))
-    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin) VALUES (?, ?, ?)", 
-             ('cyscom', '15012022', 0))
+    # Insert initial users with session_id
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin, session_id) VALUES (?, ?, ?, ?)", 
+             ('admin', admin_password, 1, session_id))
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin, session_id) VALUES (?, ?, ?, ?)", 
+             ('user', 'password123', 0, session_id))
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin, session_id) VALUES (?, ?, ?, ?)", 
+             ('Unknown', 'Th3w3eknd15th3be35T', 0, session_id))
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin, session_id) VALUES (?, ?, ?, ?)", 
+             ('cabinet', cabinet_password, 0, session_id))
+    c.execute("INSERT OR IGNORE INTO users (username, password, is_admin, session_id) VALUES (?, ?, ?, ?)", 
+             ('cyscom', '15012022', 0, session_id))
 
-    # Add the non-deletable notes
+    # Add the non-deletable notes with session_id
     image_note = '<div style="text-align: center;"><h3>My Darkest Hours</h3><img src="/userdata/88382n2nbd92.png" alt="Different girls on the floor, distractin my thoughts of you" style="max-width: 100%; height: auto;"><p>Girl, I felt so alone inside of this crowded room</p></div>'
-    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
-             ('Unknown', 'Important Notice', image_note, 0))
+    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable, session_id) VALUES (?, ?, ?, ?, ?)",
+             ('Unknown', 'Important Notice', image_note, 0, session_id))
 
     audio_note = '''<div style="text-align: center;">
         <h3>Internal Meeting Recording - Confidential</h3>
@@ -407,19 +413,19 @@ def init_user_db(db_path, session_id=None):
         <p style="color: black; margin-top: 10px;">No. The file is not corrupted.</p>
         <p><a href="/userdata/internalmeet28-03-2025.wav" download class="btn btn-primary" style="display: inline-block; padding: 8px 16px; background: #4f46e5; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px;">Download Recording</a></p>
     </div>'''
-    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
-             ('user', 'Internal Meeting Recording', audio_note, 0))
-    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
-             ('cabinet', 'Remember The Date, When it was created', '<a href="https://cyscomvit.com/">Click Me!</a>', 0))
-    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable) VALUES (?, ?, ?, ?)",
-             ('cabinet', 'Attention!','Our main account will be deleted soon since the password was too easy to guess. I mean who uses a date as password? Please inform all members to create new accounts with stronger passwords', 0))
+    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable, session_id) VALUES (?, ?, ?, ?, ?)",
+             ('user', 'Internal Meeting Recording', audio_note, 0, session_id))
+    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable, session_id) VALUES (?, ?, ?, ?, ?)",
+             ('cabinet', 'Remember The Date, When it was created', '<a href="https://cyscomvit.com/">Click Me!</a>', 0, session_id))
+    c.execute("INSERT OR IGNORE INTO notes (username, title, content, is_deletable, session_id) VALUES (?, ?, ?, ?, ?)",
+             ('cabinet', 'Attention!','Our main account will be deleted soon since the password was too easy to guess. I mean who uses a date as password? Please inform all members to create new accounts with stronger passwords', 0, session_id))
 
     conn.commit()
     conn.close()
 
     print(f"Database initialized successfully")
     print(f"Admin password for Session {session_id}: {admin_password}")
-    print(f"Cyscom password for Session {session_id}: {cabinet_password}")
+    print(f"Cabinet password for Session {session_id}: {cabinet_password}")
     
     # Print current database count
     count_db_files()
@@ -1353,16 +1359,23 @@ def get_solved_challenges(username):
 
         conn = get_db()
         c = conn.cursor()
-        # Only get challenges solved by this specific user
+        
+        # Get current session_id
+        current_session = session.get('session_id')
+        if not current_session:
+            return []
+            
+        # Only get challenges solved by this specific user in this session
         solved = c.execute(
-            "SELECT DISTINCT challenge_name FROM solved_challenges WHERE username = ?",
-            (username,)
+            "SELECT DISTINCT challenge_name FROM solved_challenges WHERE username = ? AND session_id = ?",
+            (username, current_session)
         ).fetchall()
         
-        # Special case: if 'osint' is solved by 'user', it's available to everyone except 'cyscom'
+        # Special case: if 'osint' is solved by 'user' in this session
         if username != 'cyscom':
             osint_solved = c.execute(
-                "SELECT 1 FROM solved_challenges WHERE challenge_name = 'osint' AND username = 'user'"
+                "SELECT 1 FROM solved_challenges WHERE challenge_name = 'osint' AND username = 'user' AND session_id = ?",
+                (current_session,)
             ).fetchone()
             if osint_solved and 'osint' not in [row[0] for row in solved]:
                 solved.append(('osint',))
@@ -1383,14 +1396,17 @@ def mark_challenge_solved(username, challenge_name):
             if challenge_name == 'osint':
                 conn = get_db()
                 c = conn.cursor()
-                # Check if already solved
+                current_session = session.get('session_id')
+                # Check if already solved in this session
                 result = c.execute(
-                    "SELECT id FROM solved_challenges WHERE challenge_name = 'osint' AND username = 'cyscom'"
+                    "SELECT id FROM solved_challenges WHERE challenge_name = 'osint' AND username = 'cyscom' AND session_id = ?",
+                    (current_session,)
                 ).fetchone()
                 
                 if not result:
                     c.execute(
-                        "INSERT INTO solved_challenges (username, challenge_name) VALUES ('cyscom', 'osint')"
+                        "INSERT INTO solved_challenges (username, challenge_name, session_id) VALUES ('cyscom', 'osint', ?)",
+                        (current_session,)
                     )
                     conn.commit()
                 if 'conn' in locals():
@@ -1400,16 +1416,18 @@ def mark_challenge_solved(username, challenge_name):
 
         conn = get_db()
         c = conn.cursor()
-        # Check if already solved by this specific user
+        current_session = session.get('session_id')
+        
+        # Check if already solved by this specific user in this session
         result = c.execute(
-            "SELECT id FROM solved_challenges WHERE challenge_name = ? AND username = ?",
-            (challenge_name, username)
+            "SELECT id FROM solved_challenges WHERE challenge_name = ? AND username = ? AND session_id = ?",
+            (challenge_name, username, current_session)
         ).fetchone()
         
         if not result:
             c.execute(
-                "INSERT INTO solved_challenges (username, challenge_name) VALUES (?, ?)",
-                (username, challenge_name)
+                "INSERT INTO solved_challenges (username, challenge_name, session_id) VALUES (?, ?, ?)",
+                (username, challenge_name, current_session)
             )
             conn.commit()
             return True
